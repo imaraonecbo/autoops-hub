@@ -31,9 +31,22 @@ app = FastAPI(
 )
 
 # Enable modern production-grade CORS headers
+# To satisfy DevSecOps standards, we parse from an env variable and avoid "*" wildcard alongside allow_credentials=True
+raw_origins = os.getenv("ALLOWED_ORIGINS", "")
+if raw_origins:
+    ALLOWED_ORIGINS = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+else:
+    # Explicitly whitelist standard development origins
+    ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://ais-dev-7nyigeiij7v5y34benmwxd-304369769553.europe-west2.run.app",
+        "https://ais-pre-7nyigeiij7v5y34benmwxd-304369769553.europe-west2.run.app"
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict to explicit domains in staging or production environments
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
@@ -189,8 +202,16 @@ async def clean_csv(
     current_credits = security_context["monthly_credits_used"]
 
     try:
-        # A. Safely read and decode file streaming in-memory to prevent local disk write caching
-        content = await file.read()
+        # A. Safely read and decode file streaming in-memory up to a secure 20MB limit
+        MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 Megabytes
+        content = await file.read(MAX_FILE_SIZE)
+        extra = await file.read(1)
+        if extra:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Payload Too Large: CSV file size exceeds the strict production security payload boundary of 20MB."
+            )
+        
         decoded_text = content.decode("utf-8")
         
         input_stream = io.StringIO(decoded_text)
@@ -216,8 +237,7 @@ async def clean_csv(
         next_credits = current_credits + 1
         
         supabase.table("usage_ledger").update({
-            "monthly_credits_used": next_credits,
-            "total_lifetime_jobs": supabase.postgrest.types.APIResponse # Using raw database increments to avoid race condition state writes
+            "monthly_credits_used": next_credits
         }).eq("profile_id", user_id).execute()
 
         # Update lifetime counter using Postgrest raw modifier or rpc
@@ -270,7 +290,7 @@ async def bot_webhook(
         logger.info(f"Webhook automated pipeline successfully triggered by script worker for user_id: {user_id}.")
         return WebhookResponse(
             success=True,
-            message=f"Autonomous action pipeline loaded successfully. Job routed to scheduler context.",
+            message="Autonomous action pipeline loaded successfully. Job routed to scheduler context.",
             details={
                 "task_action": payload.task_action,
                 "current_credits_count": next_credits,
@@ -285,7 +305,7 @@ async def bot_webhook(
         )
 
 # ----------------------------------------------------------------------------
-# 5. UNIFIED UNIFIED CHECKOUT & WEBHOOK ROUTER
+# 5. UNIFIED CHECKOUT & WEBHOOK ROUTER
 # ----------------------------------------------------------------------------
 
 @app.post("/api/v1/payments/paypal-webhook", response_model=WebhookResponse)
@@ -298,9 +318,8 @@ async def paypal_webhook(request: Request):
     payload_bytes = await request.body()
     payload_str = payload_bytes.decode("utf-8")
     
-    # 1. DevSecOps Verification Check of PayPal Signature Headers
+    # DevSecOps Verification Check of PayPal Signature Headers
     paypal_signature = request.headers.get("PAYPAL-TRANSMISSION-SIG")
-    paypal_cert_url = request.headers.get("PAYPAL-CERT-URL")
     
     # Logger monitoring of financial telemetry payload ingress
     logger.info(f"Incoming PayPal Webhook event processed. Signature present: {paypal_signature is not None}")
@@ -315,7 +334,7 @@ async def paypal_webhook(request: Request):
             amount_val = float(resource.get("amount", {}).get("value", 0.0))
             gateway_transaction_id = resource.get("id")
 
-            # Extract our custom billing identifiers sent during Stripe/PayPal session creation
+            # Extract our custom billing identifiers sent during PayPal session creation
             # In production, custom_id is passed as a string stringified json object nested inside payload
             custom_payload = resource.get("custom_id", "")
             try:
@@ -351,7 +370,7 @@ async def paypal_webhook(request: Request):
                 "last_reset_date": "now()"
             }).eq("profile_id", target_user_id).execute()
 
-            # 3. Log Financial ledger entries for audits
+            # 3. Log Financial ledger entries for audits (Strictly PayPal only)
             supabase.table("transactions").insert({
                 "profile_id": target_user_id,
                 "payment_gateway": "paypal",
@@ -380,98 +399,39 @@ async def paypal_webhook(request: Request):
         )
 
 
+# ============================================================================
+# 6. SAFARICOM M-PESA DARAJA API DEPRECATION INTERCEPTORS (SOLE ROUTER TO PAYPAL)
+# ============================================================================
+
+@app.post("/api/v1/payments/mpesa/stk-push")
+@app.post("/api/v1/payments/mpesa/c2b-callback")
+@app.post("/api/v1/payments/mpesa/b2c-callback")
+@app.post("/api/v1/payments/mpesa/b2b-callback")
+@app.post("/api/v1/payments/mpesa/transaction-status")
+@app.get("/api/v1/payments/mpesa/transaction-status")
+async def mpesa_legacy_intercept():
+    """
+    Blocks legacy Safaricom Daraja API requests, STK push actions, pay bill operations, 
+    and transaction state queries. Returns a strict HTTP 503 Service Unavailable exception.
+    """
+    logger.warning("Unsanctioned access attempt to deprecated M-Pesa Daraja API. Access intercepted and denied.")
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="M-Pesa cashout method has been deprecated."
+    )
+
+
 @app.post("/api/v1/payments/crypto-webhook", response_model=WebhookResponse)
 async def crypto_webhook(request: Request):
     """
-    Coinbase Commerce Payment Webhook Handler.
-    Verifies dynamic SHA256 signatures, validates payment details, and triggers tier credits updates.
+    Coinbase Commerce Payment Webhook Handler (Deprecated/Deactivated).
+    To enforce PayPal as the single authorized gateway, crypto checkouts have been disabled.
     """
-    payload_bytes = await request.body()
-    payload_str = payload_bytes.decode("utf-8")
-    
-    # DevSecOps cryptographic checking: coinbase uses standard hmac-sha256 signing headers
-    coinbase_signature = request.headers.get("X-CC-Webhook-Signature")
-    
-    if COINBASE_WEBHOOK_SECRET and COINBASE_WEBHOOK_SECRET != "coinbase_signing_secret_placeholder":
-        # Calculate HMAC sha256
-        calculated_sig = hmac.new(
-            COINBASE_WEBHOOK_SECRET.encode("utf-8"),
-            payload_bytes,
-            hashlib.sha256
-        ).hexdigest()
-        
-        if not hmac.compare_digest(calculated_sig, coinbase_signature or ""):
-            logger.warning("Coinbase signature inspection failed. Request rejected.")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Signature confirmation failed: Invalid cryptographic keys."
-            )
-
-    try:
-        data = json.loads(payload_str)
-        event = data.get("event", {})
-        event_type = event.get("type")
-        
-        if event_type == "charge:confirmed":
-            charge_data = event.get("data", {})
-            metadata = charge_data.get("metadata", {})
-            target_user_id = metadata.get("user_id") or metadata.get("customer_id")
-            gateway_transaction_id = charge_data.get("code")  # Coinbase unique alphanumeric code
-
-            payments = charge_data.get("payments", [])
-            amount_paid = 0.0
-            if payments:
-                amount_paid = float(payments[0].get("value", {}).get("local", {}).get("amount", 0.0))
-
-            if not target_user_id:
-                raise ValueError("Crypto checkout error: Custom metadata user_id is missing.")
-
-            # Tier classification
-            assigned_tier = "free"
-            if 50.0 <= amount_paid < 80.0:
-                assigned_tier = "tier_1_51"
-            elif 80.0 <= amount_paid < 120.0:
-                assigned_tier = "tier_2_83"
-            elif amount_paid >= 120.0:
-                assigned_tier = "tier_3_129"
-
-            # Database updates
-            supabase.table("profiles").update({
-                "current_tier": assigned_tier,
-                "status": "active"
-            }).eq("user_id", target_user_id).execute()
-
-            supabase.table("usage_ledger").update({
-                "monthly_credits_used": 0,
-                "last_reset_date": "now()"
-            }).eq("profile_id", target_user_id).execute()
-
-            supabase.table("transactions").insert({
-                "profile_id": target_user_id,
-                "payment_gateway": "crypto",
-                "gateway_transaction_id": gateway_transaction_id,
-                "amount_paid": amount_paid
-            }).execute()
-
-            logger.info(f"Crypto Coinbase Charge confirmed for client {target_user_id} -> Upgraded to {assigned_tier}")
-            return WebhookResponse(
-                success=True,
-                message="Crypto profiles and usage resets updated successfully from blockchain transaction confirmation log.",
-                details={"charge_code": gateway_transaction_id, "user_id": target_user_id, "tier": assigned_tier}
-            )
-
-        return WebhookResponse(
-            success=True,
-            message="Crypto event logged but is not confirmed block state.",
-            details={"received_event_type": event_type}
-        )
-
-    except Exception as e:
-        logger.error(f"Error parsing Coinbase webhook payload structure: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Crypto payment verification error: {str(e)}"
-        )
+    logger.warning("Intercepted crypto payment webhook event. Gateway deactivated.")
+    raise HTTPException(
+        status_code=status.HTTP_510_NOT_EXTENDED,
+        detail="Crypto payment method has been migrated. Please use PayPal for all automated operations pricing subscriptions."
+    )
 
 
 if __name__ == "__main__":
