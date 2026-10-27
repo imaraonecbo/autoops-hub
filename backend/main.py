@@ -15,6 +15,8 @@ from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, R
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from supabase import create_client, Client
+import httpx
+from uuid import UUID
 
 # Initialize elite structured logging
 logging.basicConfig(
@@ -56,19 +58,24 @@ app.add_middleware(
 # 1. CONFIGURATION & CLIENT INITIALIZATION
 # ----------------------------------------------------------------------------
 
-# Load core secrets checking fallback defaults to prevent startup crashes in sandboxes
-SUPABASE_URL: str = os.getenv("SUPABASE_URL", "https://placeholder-project.supabase.co")
-SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "placeholder-service-role-key-never-expose-to-public")
-PAYPAL_WEBHOOK_ID: str = os.getenv("PAYPAL_WEBHOOK_ID", "WH-PLACEHOLDER-WEBHOOK-ID")
-COINBASE_WEBHOOK_SECRET: str = os.getenv("COINBASE_WEBHOOK_SECRET", "coinbase_signing_secret_placeholder")
+# Fail closed: never construct a client using placeholder credentials.
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+PAYPAL_WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "").strip()
+PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "").strip()
+PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_CLIENT_SECRET", "").strip()
+PAYPAL_API_BASE = os.getenv("PAYPAL_API_BASE", "https://api-m.paypal.com").rstrip("/")
+COINBASE_WEBHOOK_SECRET = os.getenv("COINBASE_WEBHOOK_SECRET", "").strip()
 
-# Set up the secure Supabase client instantiation
-try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    logger.info("Supabase client initialized successfully.")
-except Exception as e:
-    logger.critical(f"Critical error initializing Supabase client connection: {str(e)}")
-    supabase = None  # Graceful fallback context checks in API routers
+supabase: Optional[Client] = None
+if SUPABASE_URL and SUPABASE_KEY and "placeholder" not in SUPABASE_URL.lower() and "placeholder" not in SUPABASE_KEY.lower() and "unconfigured" not in SUPABASE_KEY.lower():
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info("Supabase client initialized.")
+    except Exception:
+        logger.exception("Supabase client initialization failed.")
+else:
+    logger.error("Supabase credentials are missing or are placeholder values; database-backed routes will fail closed.")
 
 # ----------------------------------------------------------------------------
 # 2. SEED MODELS AND DEFINITIONS
@@ -308,95 +315,156 @@ async def bot_webhook(
 # 5. UNIFIED CHECKOUT & WEBHOOK ROUTER
 # ----------------------------------------------------------------------------
 
-@app.post("/api/v1/payments/paypal-webhook", response_model=WebhookResponse)
-async def paypal_webhook(request: Request):
-    """
-    Secure PayPal Payment Gateway Webhook handler conforming to production DevSecOps criteria.
-    Verifies payload structures, authenticates webhook signatures, parses tracking parameters from custom elements,
-    and updates tier levels inside database models.
-    """
-    payload_bytes = await request.body()
-    payload_str = payload_bytes.decode("utf-8")
-    
-    # DevSecOps Verification Check of PayPal Signature Headers
-    paypal_signature = request.headers.get("PAYPAL-TRANSMISSION-SIG")
-    
-    # Logger monitoring of financial telemetry payload ingress
-    logger.info(f"Incoming PayPal Webhook event processed. Signature present: {paypal_signature is not None}")
+async def verify_paypal_signature(request: Request, event: Dict[str, Any]) -> None:
+    """Ask PayPal's official verification API to validate the exact webhook headers and event."""
+    if not PAYPAL_CLIENT_ID or not PAYPAL_CLIENT_SECRET or not PAYPAL_WEBHOOK_ID or "PLACEHOLDER" in PAYPAL_WEBHOOK_ID.upper() or "UNCONFIGURED" in PAYPAL_WEBHOOK_ID.upper():
+        raise HTTPException(status_code=503, detail="PayPal webhook verification is not configured.")
+
+    header_names = {
+        "transmission_id": "PAYPAL-TRANSMISSION-ID",
+        "transmission_time": "PAYPAL-TRANSMISSION-TIME",
+        "transmission_sig": "PAYPAL-TRANSMISSION-SIG",
+        "cert_url": "PAYPAL-CERT-URL",
+        "auth_algo": "PAYPAL-AUTH-ALGO",
+    }
+    verification_payload: Dict[str, Any] = {}
+    for field, header in header_names.items():
+        value = request.headers.get(header)
+        if not value:
+            raise HTTPException(status_code=401, detail="Required PayPal signature headers are missing.")
+        verification_payload[field] = value
+    verification_payload["webhook_id"] = PAYPAL_WEBHOOK_ID
+    verification_payload["webhook_event"] = event
 
     try:
-        data = json.loads(payload_str)
-        event_type = data.get("event_type")
-        
-        # We target PAYMENT.CAPTURE.COMPLETED payload logs for financial auditing
-        if event_type == "PAYMENT.CAPTURE.COMPLETED":
-            resource = data.get("resource", {})
-            amount_val = float(resource.get("amount", {}).get("value", 0.0))
-            gateway_transaction_id = resource.get("id")
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            token_response = await client.post(
+                f"{PAYPAL_API_BASE}/v1/oauth2/token",
+                auth=(PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET),
+                data={"grant_type": "client_credentials"},
+                headers={"Accept": "application/json", "Accept-Language": "en_US"},
+            )
+            token_response.raise_for_status()
+            access_token = token_response.json().get("access_token")
+            if not access_token:
+                raise HTTPException(status_code=503, detail="PayPal did not issue an access token.")
+            verification_response = await client.post(
+                f"{PAYPAL_API_BASE}/v1/notifications/verify-webhook-signature",
+                json=verification_payload,
+                headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            )
+            verification_response.raise_for_status()
+            verification_status = verification_response.json().get("verification_status")
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError):
+        logger.exception("PayPal verification service request failed.")
+        raise HTTPException(status_code=503, detail="PayPal verification service is temporarily unavailable.")
 
-            # Extract our custom billing identifiers sent during PayPal session creation
-            # In production, custom_id is passed as a string stringified json object nested inside payload
-            custom_payload = resource.get("custom_id", "")
-            try:
-                custom_data = json.loads(custom_payload)
-                target_user_id = custom_data.get("user_id")
-            except Exception:
-                # Fallback to metadata searches in event paths
-                target_user_id = data.get("summary", "").split(":")[-1].strip()
+    if verification_status != "SUCCESS":
+        logger.warning("Rejected PayPal webhook with unsuccessful signature verification.")
+        raise HTTPException(status_code=401, detail="PayPal webhook signature verification failed.")
 
-            if not target_user_id:
-                raise ValueError("Target unique profile uuid not found within transaction parameters.")
 
-            # Map the transaction amount paid to our business tiers structure:
-            # $51 -> tier_1_51, $83 -> tier_2_83, $129 -> tier_3_129
-            assigned_tier = "free"
-            if 50.0 <= amount_val < 80.0:
-                assigned_tier = "tier_1_51"
-            elif 80.0 <= amount_val < 120.0:
-                assigned_tier = "tier_2_83"
-            elif amount_val >= 120.0:
-                assigned_tier = "tier_3_129"
+@app.post("/api/v1/payments/paypal-webhook", response_model=WebhookResponse)
+async def paypal_webhook(request: Request):
+    """Accept payment events only after PayPal's remote signature verification succeeds."""
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Payment processing is unavailable because the database is not configured.")
 
-            # Execute transactional atomic updates across ledger profiles:
-            # 1. Update Profile Current Tier & Subscription status
-            supabase.table("profiles").update({
-                "current_tier": assigned_tier,
-                "status": "active"
-            }).eq("user_id", target_user_id).execute()
+    try:
+        payload_bytes = await request.body()
+        data = json.loads(payload_bytes)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON webhook payload.")
 
-            # 2. Reset Monthly Credits to 0 on subscription reset event
-            supabase.table("usage_ledger").update({
-                "monthly_credits_used": 0,
-                "last_reset_date": "now()"
-            }).eq("profile_id", target_user_id).execute()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Invalid webhook event structure.")
 
-            # 3. Log Financial ledger entries for audits (Strictly PayPal only)
-            supabase.table("transactions").insert({
-                "profile_id": target_user_id,
-                "payment_gateway": "paypal",
-                "gateway_transaction_id": gateway_transaction_id,
-                "amount_paid": amount_val
-            }).execute()
+    await verify_paypal_signature(request, data)
 
-            logger.info(f"PayPal upgrade completed for user {target_user_id} -> Upgraded to {assigned_tier}")
+    event_type = data.get("event_type")
+    if event_type != "PAYMENT.CAPTURE.COMPLETED":
+        return WebhookResponse(
+            success=True,
+            message="Verified PayPal event acknowledged; no account change was required.",
+            details={"received_event_type": event_type},
+        )
+
+    resource = data.get("resource") or {}
+    amount = resource.get("amount") or {}
+    transaction_id = resource.get("id")
+    if not transaction_id or not isinstance(amount, dict):
+        raise HTTPException(status_code=400, detail="Verified capture event is missing transaction details.")
+
+    try:
+        amount_val = round(float(amount.get("value")), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid payment amount.")
+    if amount.get("currency_code") != "USD":
+        raise HTTPException(status_code=400, detail="Only USD payments are accepted.")
+
+    # Only accept the exact published prices; never upgrade accounts based on broad ranges.
+    tier_by_amount = {51.00: "tier_1_51", 83.00: "tier_2_83", 129.00: "tier_3_129"}
+    assigned_tier = tier_by_amount.get(amount_val)
+    if assigned_tier is None:
+        raise HTTPException(status_code=400, detail="Payment amount does not match a configured tier.")
+
+    custom_payload = resource.get("custom_id") or ""
+    try:
+        custom_data = json.loads(custom_payload) if isinstance(custom_payload, str) else custom_payload
+        target_user_id = str(UUID(str(custom_data.get("user_id", ""))))
+    except (ValueError, TypeError, AttributeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="A valid user_id UUID is required in the verified capture custom_id.")
+
+    try:
+        # A duplicate delivery must not reapply a payment. A database unique constraint on
+        # (payment_gateway, gateway_transaction_id) is still required for race-safe idempotency.
+        prior = (
+            supabase.table("transactions")
+            .select("gateway_transaction_id")
+            .eq("payment_gateway", "paypal")
+            .eq("gateway_transaction_id", transaction_id)
+            .limit(1)
+            .execute()
+        )
+        if prior.data:
             return WebhookResponse(
                 success=True,
-                message="Profiles and credit ledger synchronized successfully from PayPal payment event log.",
-                details={"transaction_id": gateway_transaction_id, "user_id": target_user_id, "tier": assigned_tier}
+                message="Verified PayPal capture was already recorded.",
+                details={"transaction_id": transaction_id, "duplicate": True},
             )
 
-        return WebhookResponse(
-            success=True, 
-            message="PayPal webhook event processed successfully but event_type is not payment completion.",
-            details={"received_event_type": event_type}
-        )
+        profile_result = supabase.table("profiles").select("user_id").eq("user_id", target_user_id).limit(1).execute()
+        if not profile_result.data:
+            raise HTTPException(status_code=404, detail="The paid account does not exist.")
 
-    except Exception as e:
-        logger.error(f"Critical error parsing PayPal transaction payload: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Webhook sync structure exception: {str(e)}"
+        ledger_result = supabase.table("usage_ledger").select("profile_id").eq("profile_id", target_user_id).limit(1).execute()
+        if not ledger_result.data:
+            raise HTTPException(status_code=503, detail="The account usage ledger is not provisioned.")
+
+        supabase.table("transactions").insert({
+            "profile_id": target_user_id,
+            "payment_gateway": "paypal",
+            "gateway_transaction_id": transaction_id,
+            "amount_paid": amount_val,
+        }).execute()
+        supabase.table("profiles").update({
+            "current_tier": assigned_tier,
+            "status": "active",
+        }).eq("user_id", target_user_id).execute()
+
+        logger.info("Verified PayPal capture recorded and tier updated for account %s.", target_user_id)
+        return WebhookResponse(
+            success=True,
+            message="Verified PayPal capture recorded and account tier updated.",
+            details={"transaction_id": transaction_id, "user_id": target_user_id, "tier": assigned_tier},
         )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Verified PayPal capture could not be applied to the database.")
+        raise HTTPException(status_code=503, detail="Payment was verified but could not be recorded; retry delivery later.")
 
 
 # ============================================================================
