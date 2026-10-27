@@ -91,17 +91,26 @@ class PayPalWebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(verification_call.args[0].endswith("/v1/notifications/verify-webhook-signature"))
         self.assertEqual(verification_call.kwargs["json"]["webhook_event"], {"id": "EVENT-1"})
 
-    async def test_verified_capture_uses_atomic_database_rpc(self):
+    async def test_verified_capture_uses_server_recorded_order_and_atomic_rpc(self):
         user_id = "00000000-0000-0000-0000-000000000123"
         event = {
             "event_type": "PAYMENT.CAPTURE.COMPLETED",
             "resource": {
                 "id": "CAPTURE-TEST-123",
                 "amount": {"value": "51.00", "currency_code": "USD"},
-                "custom_id": json.dumps({"user_id": user_id}),
+                "custom_id": user_id,
+                "supplementary_data": {"related_ids": {"order_id": "ORDER-TEST-123"}},
             },
         }
         fake_db = MagicMock()
+        fake_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [{
+            "paypal_order_id": "ORDER-TEST-123",
+            "user_id": user_id,
+            "tier": "tier_1_51",
+            "amount": 51.0,
+            "status": "pending",
+            "capture_id": None,
+        }]
         fake_db.rpc.return_value.execute.return_value.data = {
             "success": True, "duplicate": False, "tier": "tier_1_51"
         }
