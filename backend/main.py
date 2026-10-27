@@ -353,35 +353,29 @@ async def verify_paypal_signature(request: Request, event: Dict[str, Any]) -> No
 
 @app.post("/api/v1/payments/paypal-webhook", response_model=WebhookResponse)
 async def paypal_webhook(request: Request):
-    """Accept payment events only after PayPal's remote signature verification succeeds."""
+    """Accept only verified PayPal captures that match a server-created order."""
     if supabase is None:
         raise HTTPException(status_code=503, detail="Payment processing is unavailable because the database is not configured.")
-
     try:
-        payload_bytes = await request.body()
-        data = json.loads(payload_bytes)
+        data = json.loads(await request.body())
     except (json.JSONDecodeError, UnicodeDecodeError):
         raise HTTPException(status_code=400, detail="Invalid JSON webhook payload.")
-
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="Invalid webhook event structure.")
 
     await verify_paypal_signature(request, data)
-
     event_type = data.get("event_type")
     if event_type != "PAYMENT.CAPTURE.COMPLETED":
-        return WebhookResponse(
-            success=True,
-            message="Verified PayPal event acknowledged; no account change was required.",
-            details={"received_event_type": event_type},
-        )
+        return WebhookResponse(success=True, message="Verified PayPal event acknowledged; no account change was required.",
+                               details={"received_event_type": event_type})
 
     resource = data.get("resource") or {}
     amount = resource.get("amount") or {}
-    transaction_id = resource.get("id")
-    if not transaction_id or not isinstance(amount, dict):
-        raise HTTPException(status_code=400, detail="Verified capture event is missing transaction details.")
-
+    capture_id = resource.get("id")
+    related_ids = ((resource.get("supplementary_data") or {}).get("related_ids") or {})
+    order_id = related_ids.get("order_id")
+    if not capture_id or not order_id or not isinstance(amount, dict):
+        raise HTTPException(status_code=400, detail="Capture event is missing its capture/order identifiers or amount.")
     try:
         amount_val = round(float(amount.get("value")), 2)
     except (TypeError, ValueError):
@@ -389,42 +383,40 @@ async def paypal_webhook(request: Request):
     if amount.get("currency_code") != "USD":
         raise HTTPException(status_code=400, detail="Only USD payments are accepted.")
 
-    # Only accept the exact published prices; never upgrade accounts based on broad ranges.
-    tier_by_amount = {51.00: "tier_1_51", 83.00: "tier_2_83", 129.00: "tier_3_129"}
-    assigned_tier = tier_by_amount.get(amount_val)
-    if assigned_tier is None:
-        raise HTTPException(status_code=400, detail="Payment amount does not match a configured tier.")
-
-    custom_payload = resource.get("custom_id") or ""
     try:
-        custom_data = json.loads(custom_payload) if isinstance(custom_payload, str) else custom_payload
-        target_user_id = str(UUID(str(custom_data.get("user_id", ""))))
-    except (ValueError, TypeError, AttributeError, json.JSONDecodeError):
-        raise HTTPException(status_code=400, detail="A valid user_id UUID is required in the verified capture custom_id.")
+        orders = supabase.table("paypal_orders").select("*").eq("paypal_order_id", order_id).limit(1).execute()
+        if not orders.data:
+            raise HTTPException(status_code=404, detail="Verified PayPal capture does not match a server-created checkout order.")
+        saved = orders.data[0]
+        if float(saved.get("amount", 0)) != amount_val:
+            raise HTTPException(status_code=400, detail="Capture amount does not match the server-recorded checkout.")
+        tier = saved.get("tier")
+        if tier not in TIERS or float(TIERS[tier][0]) != amount_val:
+            raise HTTPException(status_code=400, detail="Recorded checkout tier and capture amount do not match.")
+        custom_id = resource.get("custom_id")
+        if custom_id and custom_id != saved.get("user_id"):
+            raise HTTPException(status_code=400, detail="Capture customer metadata does not match the server-recorded checkout.")
+        if saved.get("status") == "captured":
+            if saved.get("capture_id") != capture_id:
+                raise HTTPException(status_code=409, detail="Checkout was already fulfilled by a different capture.")
+            return WebhookResponse(success=True, message="Verified duplicate PayPal webhook acknowledged.",
+                                   details={"transaction_id": capture_id, "duplicate": True, "tier": tier})
 
-    try:
-        result = supabase.rpc("apply_paypal_capture", {
-            "p_user_id": target_user_id,
-            "p_transaction_id": transaction_id,
+        supabase.rpc("apply_paypal_capture", {
+            "p_user_id": saved["user_id"],
+            "p_transaction_id": capture_id,
             "p_amount_paid": amount_val,
-            "p_assigned_tier": assigned_tier,
+            "p_assigned_tier": tier,
         }).execute()
-        result_data = result.data if isinstance(result.data, dict) else {}
-        logger.info(
-            "Verified PayPal capture processed for account %s (duplicate=%s).",
-            target_user_id,
-            bool(result_data.get("duplicate", False)),
-        )
-        return WebhookResponse(
-            success=True,
-            message="Verified PayPal capture recorded and account tier synchronized.",
-            details={
-                "transaction_id": transaction_id,
-                "user_id": target_user_id,
-                "tier": assigned_tier,
-                "duplicate": bool(result_data.get("duplicate", False)),
-            },
-        )
+        supabase.table("paypal_orders").update({
+            "status": "captured",
+            "capture_id": capture_id,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("paypal_order_id", order_id).execute()
+        logger.info("Verified PayPal capture applied to server-created order %s.", order_id)
+        return WebhookResponse(success=True, message="Verified PayPal capture recorded and account tier synchronized.",
+                               details={"transaction_id": capture_id, "user_id": saved["user_id"],
+                                        "tier": tier, "duplicate": False})
     except HTTPException:
         raise
     except Exception:
