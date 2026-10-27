@@ -26,7 +26,7 @@ class TieredCsvTests(unittest.TestCase):
         summary = result["summary"]
         self.assertEqual(summary["plan"], "Ultimate")
         self.assertEqual(summary["column_quality"][0]["inferred_type"], "text")
-        self.assertTrue(any("age" in flag for flag in summary["quality_flags"]))
+        self.assertTrue(any("note" in flag for flag in summary["quality_flags"]))
 
     def test_row_limit_is_enforced_per_tier(self):
         rows = "name\n" + "".join(f"person{i}\n" for i in range(1001))
