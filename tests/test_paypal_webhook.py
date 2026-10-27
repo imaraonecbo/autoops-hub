@@ -24,8 +24,7 @@ def make_request(headers=None, body=b"{}"):
         "headers": raw_headers,
         "server": ("testserver", 443),
         "client": ("127.0.0.1", 12345),
-        "receive": receive_body(body),
-    })
+    }, receive=receive_body(body))
 
 
 def receive_body(body):
