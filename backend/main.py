@@ -502,6 +502,21 @@ def _set_session_cookie(response, auth_data: Dict[str, Any]) -> None:
         max_age=int(auth_data.get("expires_in") or 3600), path="/",
     )
 
+@app.get("/api/v1/health")
+async def health_check():
+    """Non-sensitive readiness probe; checks actual PostgREST connectivity."""
+    result = {"status": "ok", "database_configured": bool(supabase), "database_reachable": False}
+    if supabase is not None:
+        try:
+            supabase.table("profiles").select("user_id").limit(1).execute()
+            result["database_reachable"] = True
+        except Exception:
+            logger.exception("Supabase readiness query failed.")
+            result["status"] = "degraded"
+    else:
+        result["status"] = "degraded"
+    return result
+
 @app.get("/", response_class=HTMLResponse)
 async def customer_portal():
     return HTMLResponse(r'''<!doctype html>
