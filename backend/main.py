@@ -147,26 +147,15 @@ async def verify_user_and_credits(request: Request) -> Dict[str, Any]:
             raise HTTPException(status_code=409, detail="Usage ledger is not provisioned for this account.")
         ledger = ledger_res.data[0]
         monthly_credits = int(ledger.get("monthly_credits_used", 0) or 0)
-        now = datetime.now(timezone.utc)
-        reset_value = ledger.get("last_reset_date")
-        try:
-            reset_date = datetime.fromisoformat(str(reset_value).replace("Z", "+00:00")) if reset_value else None
-        except ValueError:
-            reset_date = None
-        if reset_date is None or (reset_date.year, reset_date.month) != (now.year, now.month):
-            supabase.table("usage_ledger").update({
-                "monthly_credits_used": 0,
-                "last_reset_date": now.isoformat(),
-            }).eq("profile_id", user_id).execute()
-            monthly_credits = 0
+        lifetime_jobs = int(ledger.get("total_lifetime_jobs", 0) or 0)
         limits = TIER_LIMITS.get(current_tier, TIER_LIMITS["free"])
-        if monthly_credits >= limits["monthly_jobs"]:
+        if lifetime_jobs >= limits["included_jobs"]:
             raise HTTPException(status_code=402, detail={
-                "error": "Monthly job limit reached",
+                "error": "Included job allowance exhausted",
                 "current_tier": current_tier,
-                "monthly_credits_used": monthly_credits,
-                "monthly_job_limit": limits["monthly_jobs"],
-                "message": f"{limits['label']} includes {limits['monthly_jobs']:,} jobs per calendar month.",
+                "total_lifetime_jobs": lifetime_jobs,
+                "included_job_limit": limits["included_jobs"],
+                "message": f"{limits['label']} includes {limits['included_jobs']:,} total jobs for this purchase tier.",
                 "pricing_options": {
                     "tier_1_51": {"unit_price": 51.00, "tier_name": "Basic"},
                     "tier_2_83": {"unit_price": 83.00, "tier_name": "Scale"},
@@ -175,7 +164,8 @@ async def verify_user_and_credits(request: Request) -> Dict[str, Any]:
             })
         return {"user_id": user_id, "email": auth_user.get("email"),
                 "current_tier": current_tier, "monthly_credits_used": monthly_credits,
-                "monthly_job_limit": limits["monthly_jobs"], "max_rows": limits["max_rows"]}
+                "total_lifetime_jobs": lifetime_jobs,
+                "included_job_limit": limits["included_jobs"], "max_rows": limits["max_rows"]}
     except HTTPException:
         raise
     except Exception:
@@ -237,7 +227,7 @@ async def clean_csv(
             "input_filename": file.filename,
             "status": "completed",
             "result": {"rows_cleaned": cleaned_rows_count, "formatted_result": cleaned_csv_result, "summary": report_summary},
-            "completed_at": "now()",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
         job_id = job_record.data[0]["id"] if job_record.data else None
         logger.info(f"Successfully cleaned telemetry data log for user_id: {user_id}. Rows processed: {cleaned_rows_count}.")
@@ -245,8 +235,8 @@ async def clean_csv(
             "success": True,
             "job_id": job_id,
             "rows_cleaned": cleaned_rows_count,
-            "credits_remaining": max(0, security_context.get("monthly_job_limit", 2) - next_credits),
-            "monthly_job_limit": security_context.get("monthly_job_limit", 2),
+            "credits_remaining": max(0, security_context.get("included_job_limit", 2) - (security_context.get("total_lifetime_jobs", 0) + 1)),
+            "included_job_limit": security_context.get("included_job_limit", 2),
             "summary": report_summary,
             "formatted_result": cleaned_csv_result
         }
@@ -478,10 +468,10 @@ TIERS = {
     "tier_3_129": ("129.00", "Ultimate"),
 }
 TIER_LIMITS = {
-    "free": {"monthly_jobs": 2, "max_rows": 100, "label": "Free"},
-    "tier_1_51": {"monthly_jobs": 25, "max_rows": 1000, "label": "Basic"},
-    "tier_2_83": {"monthly_jobs": 250, "max_rows": 10000, "label": "Scale"},
-    "tier_3_129": {"monthly_jobs": 1000, "max_rows": 100000, "label": "Ultimate"},
+    "free": {"included_jobs": 2, "max_rows": 100, "label": "Free"},
+    "tier_1_51": {"included_jobs": 25, "max_rows": 1000, "label": "Basic"},
+    "tier_2_83": {"included_jobs": 250, "max_rows": 10000, "label": "Scale"},
+    "tier_3_129": {"included_jobs": 1000, "max_rows": 100000, "label": "Ultimate"},
 }
 
 def clean_csv_content(decoded_text: str, tier: str) -> Dict[str, Any]:
