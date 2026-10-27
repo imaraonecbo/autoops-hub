@@ -72,8 +72,10 @@ COINBASE_WEBHOOK_SECRET = os.getenv("COINBASE_WEBHOOK_SECRET", "").strip()
 supabase: Optional[Client] = None
 if SUPABASE_URL and SUPABASE_KEY and "placeholder" not in SUPABASE_URL.lower() and "placeholder" not in SUPABASE_KEY.lower() and "unconfigured" not in SUPABASE_KEY.lower():
     try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        logger.info("Supabase client initialized.")
+        # Construct the stateless server client without create_client()'s session restore
+        # path; customer identity is validated separately against Supabase Auth per request.
+        supabase = Client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info("Supabase client constructed; readiness endpoint will verify the database API key.")
     except Exception:
         logger.exception("Supabase client initialization failed.")
 else:
