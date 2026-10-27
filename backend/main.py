@@ -11,6 +11,7 @@ import hmac
 import hashlib
 import json
 from typing import Dict, Any, Optional
+from urllib.parse import quote
 from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Request, status
 from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -141,15 +142,31 @@ async def verify_user_and_credits(request: Request) -> Dict[str, Any]:
         profile_status_val = profile.get("status", "active")
         if profile_status_val != "active":
             raise HTTPException(status_code=403, detail=f"Subscription is currently '{profile_status_val}'.")
-        ledger_res = supabase.table("usage_ledger").select("monthly_credits_used").eq("profile_id", user_id).execute()
+        ledger_res = supabase.table("usage_ledger").select("monthly_credits_used,last_reset_date").eq("profile_id", user_id).execute()
         if not ledger_res.data:
             raise HTTPException(status_code=409, detail="Usage ledger is not provisioned for this account.")
-        monthly_credits = ledger_res.data[0].get("monthly_credits_used", 0)
-        if current_tier == "free" and monthly_credits >= 2:
+        ledger = ledger_res.data[0]
+        monthly_credits = int(ledger.get("monthly_credits_used", 0) or 0)
+        now = datetime.now(timezone.utc)
+        reset_value = ledger.get("last_reset_date")
+        try:
+            reset_date = datetime.fromisoformat(str(reset_value).replace("Z", "+00:00")) if reset_value else None
+        except ValueError:
+            reset_date = None
+        if reset_date is None or (reset_date.year, reset_date.month) != (now.year, now.month):
+            supabase.table("usage_ledger").update({
+                "monthly_credits_used": 0,
+                "last_reset_date": now.isoformat(),
+            }).eq("profile_id", user_id).execute()
+            monthly_credits = 0
+        limits = TIER_LIMITS.get(current_tier, TIER_LIMITS["free"])
+        if monthly_credits >= limits["monthly_jobs"]:
             raise HTTPException(status_code=402, detail={
-                "error": "Monthly free credits exhausted",
-                "current_tier": "free",
+                "error": "Monthly job limit reached",
+                "current_tier": current_tier,
                 "monthly_credits_used": monthly_credits,
+                "monthly_job_limit": limits["monthly_jobs"],
+                "message": f"{limits['label']} includes {limits['monthly_jobs']:,} jobs per calendar month.",
                 "pricing_options": {
                     "tier_1_51": {"unit_price": 51.00, "tier_name": "Basic"},
                     "tier_2_83": {"unit_price": 83.00, "tier_name": "Scale"},
@@ -157,7 +174,8 @@ async def verify_user_and_credits(request: Request) -> Dict[str, Any]:
                 }
             })
         return {"user_id": user_id, "email": auth_user.get("email"),
-                "current_tier": current_tier, "monthly_credits_used": monthly_credits}
+                "current_tier": current_tier, "monthly_credits_used": monthly_credits,
+                "monthly_job_limit": limits["monthly_jobs"], "max_rows": limits["max_rows"]}
     except HTTPException:
         raise
     except Exception:
@@ -197,28 +215,13 @@ async def clean_csv(
                 detail="Payload Too Large: CSV file size exceeds the strict production security payload boundary of 20MB."
             )
         
-        decoded_text = content.decode("utf-8")
-        
-        input_stream = io.StringIO(decoded_text)
-        reader = csv.reader(input_stream)
-        
-        output_stream = io.StringIO()
-        writer = csv.writer(output_stream)
+        decoded_text = content.decode("utf-8-sig")
+        cleaned = clean_csv_content(decoded_text, security_context["current_tier"])
+        cleaned_rows_count = cleaned["rows_cleaned"]
+        cleaned_csv_result = cleaned["formatted_result"]
+        report_summary = cleaned["summary"]
 
-        # B. Clean telemetry: strip whitespace and standardize column formatting
-        cleaned_rows_count = 0
-        for i, row in enumerate(reader):
-            if i == 0:
-                # Standardize headers to lowercase keys
-                writer.writerow([col.strip().lower().replace(" ", "_") for col in row])
-            else:
-                writer.writerow([col.strip() for col in row])
-                cleaned_rows_count += 1
-
-        cleaned_csv_result = output_stream.getvalue()
-
-        # C. Increment usage_ledger via transaction atomic updates
-        # This will fire the 'before_usage_ledger_write' trigger checking if credits exceed 2
+        # Increment usage only after a valid CSV has been processed.
         next_credits = current_credits + 1
         
         supabase.table("usage_ledger").update({
@@ -233,7 +236,7 @@ async def clean_csv(
             "job_type": "clean_csv",
             "input_filename": file.filename,
             "status": "completed",
-            "result": {"rows_cleaned": cleaned_rows_count, "formatted_result": cleaned_csv_result},
+            "result": {"rows_cleaned": cleaned_rows_count, "formatted_result": cleaned_csv_result, "summary": report_summary},
             "completed_at": "now()",
         }).execute()
         job_id = job_record.data[0]["id"] if job_record.data else None
@@ -242,7 +245,9 @@ async def clean_csv(
             "success": True,
             "job_id": job_id,
             "rows_cleaned": cleaned_rows_count,
-            "credits_remaining": "Unlimited" if security_context["current_tier"] != "free" else 2 - next_credits,
+            "credits_remaining": max(0, security_context.get("monthly_job_limit", 2) - next_credits),
+            "monthly_job_limit": security_context.get("monthly_job_limit", 2),
+            "summary": report_summary,
             "formatted_result": cleaned_csv_result
         }
 
@@ -470,6 +475,100 @@ TIERS = {
     "tier_2_83": ("83.00", "Scale"),
     "tier_3_129": ("129.00", "Ultimate"),
 }
+TIER_LIMITS = {
+    "free": {"monthly_jobs": 2, "max_rows": 100, "label": "Free"},
+    "tier_1_51": {"monthly_jobs": 25, "max_rows": 1000, "label": "Basic"},
+    "tier_2_83": {"monthly_jobs": 250, "max_rows": 10000, "label": "Scale"},
+    "tier_3_129": {"monthly_jobs": 1000, "max_rows": 100000, "label": "Ultimate"},
+}
+
+def clean_csv_content(decoded_text: str, tier: str) -> Dict[str, Any]:
+    """Deterministic tier-aware CSV cleanup and report generation."""
+    if tier not in TIER_LIMITS:
+        raise ValueError("Unknown access tier.")
+    reader = csv.reader(io.StringIO(decoded_text))
+    try:
+        raw_rows = list(reader)
+    except csv.Error as exc:
+        raise ValueError("CSV structure is invalid.") from exc
+    if not raw_rows:
+        raise ValueError("The CSV file is empty.")
+    headers = [str(col).strip().lower().replace(" ", "_") for col in raw_rows[0]]
+    if not headers or not any(headers):
+        raise ValueError("The CSV must contain a header row.")
+    max_rows = TIER_LIMITS[tier]["max_rows"]
+    if max(0, len(raw_rows) - 1) > max_rows:
+        raise ValueError(f"{TIER_LIMITS[tier]['label']} supports up to {max_rows:,} input data rows per CSV.")
+    normalized = []
+    for row in raw_rows[1:]:
+        row = [str(value).strip() for value in row]
+        if len(row) < len(headers):
+            row.extend([""] * (len(headers) - len(row)))
+        elif len(row) > len(headers):
+            headers.extend([f"extra_column_{i}" for i in range(1, len(row) - len(headers) + 1)])
+            for prior in normalized:
+                prior.extend([""] * (len(headers) - len(prior)))
+        normalized.append(row)
+    blank_rows_removed = 0
+    duplicate_rows_removed = 0
+    if tier in ("tier_2_83", "tier_3_129"):
+        kept = []
+        seen = set()
+        for row in normalized:
+            if not any(value.strip() for value in row):
+                blank_rows_removed += 1
+                continue
+            key = tuple(row)
+            if key in seen:
+                duplicate_rows_removed += 1
+                continue
+            seen.add(key)
+            kept.append(row)
+        normalized = kept
+    output_stream = io.StringIO()
+    writer = csv.writer(output_stream)
+    writer.writerow(headers)
+    writer.writerows(normalized)
+    missing_by_column = {
+        header: sum(1 for row in normalized if idx >= len(row) or not row[idx].strip())
+        for idx, header in enumerate(headers)
+    }
+    summary: Dict[str, Any] = {
+        "plan": TIER_LIMITS[tier]["label"],
+        "rows_received": max(0, len(raw_rows) - 1),
+        "rows_output": len(normalized),
+        "columns": len(headers),
+        "blank_rows_removed": blank_rows_removed,
+        "duplicate_rows_removed": duplicate_rows_removed,
+        "missing_values_by_column": missing_by_column if tier in ("tier_2_83", "tier_3_129") else {},
+    }
+    if tier == "tier_3_129":
+        column_quality = []
+        for idx, header in enumerate(headers):
+            values = [row[idx].strip() for row in normalized if idx < len(row) and row[idx].strip()]
+            if not values:
+                inferred = "empty"
+            elif all(v.lower() in ("true", "false", "yes", "no") for v in values):
+                inferred = "boolean-like"
+            else:
+                try:
+                    [float(v.replace(",", "")) for v in values]
+                    inferred = "numeric"
+                except ValueError:
+                    inferred = "text"
+            column_quality.append({
+                "column": header,
+                "non_empty_values": len(values),
+                "missing_values": len(normalized) - len(values),
+                "inferred_type": inferred,
+            })
+        summary["column_quality"] = column_quality
+        summary["quality_flags"] = [
+            f"{col}: {count} missing value(s)"
+            for col, count in missing_by_column.items() if count
+        ]
+    return {"rows_cleaned": len(normalized), "formatted_result": output_stream.getvalue(), "summary": summary}
+
 
 async def _supabase_auth_call(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -616,11 +715,37 @@ async def auth_signup(payload: Dict[str, Any], response: Response):
     password = str(payload.get("password", ""))
     if "@" not in email or len(password) < 10:
         raise HTTPException(status_code=400, detail="Enter a valid email and a password of at least 10 characters.")
-    auth_data = await _supabase_auth_call("signup", {"email": email, "password": password})
+    public_app_url = os.getenv("PUBLIC_APP_URL", "https://autoops-hub-staging.onrender.com").rstrip("/")
+    confirmation_redirect = f"{public_app_url}/?auth=confirmed"
+    auth_path = "signup?redirect_to=" + quote(confirmation_redirect, safe="")
+    auth_data = await _supabase_auth_call(auth_path, {"email": email, "password": password})
     if auth_data.get("access_token"):
         _set_session_cookie(response, auth_data)
         return {"message": "Account created and signed in.", "user": {"id": auth_data.get("user", {}).get("id"), "email": email}}
     return {"message": "Account created. Check your email to confirm it, then sign in.", "user": None}
+
+@app.post("/api/v1/auth/session")
+async def auth_session(payload: Dict[str, Any], response: Response):
+    """Exchange a Supabase email-confirmation access token for an HttpOnly app session cookie."""
+    access_token = str(payload.get("access_token", "")).strip()
+    if not access_token or len(access_token) > 8192:
+        raise HTTPException(status_code=400, detail="A valid confirmation session token is required.")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            verified = await client.get(
+                f"{SUPABASE_URL.rstrip('/')}/auth/v1/user",
+                headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {access_token}"},
+            )
+        if verified.status_code != 200:
+            raise HTTPException(status_code=401, detail="The confirmation link is expired or invalid. Please sign in again.")
+        _set_session_cookie(response, {"access_token": access_token, "expires_in": 3600})
+        user = verified.json()
+        return {"success": True, "message": "Email confirmed. You are signed in.", "user": {"id": user.get("id"), "email": user.get("email")}}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Supabase confirmation session exchange failed.")
+        raise HTTPException(status_code=503, detail="Could not complete email confirmation. Please sign in again.")
 
 @app.post("/api/v1/auth/login")
 async def auth_login(payload: Dict[str, Any], response: Response):
