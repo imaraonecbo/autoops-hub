@@ -418,47 +418,27 @@ async def paypal_webhook(request: Request):
         raise HTTPException(status_code=400, detail="A valid user_id UUID is required in the verified capture custom_id.")
 
     try:
-        # A duplicate delivery must not reapply a payment. A database unique constraint on
-        # (payment_gateway, gateway_transaction_id) is still required for race-safe idempotency.
-        prior = (
-            supabase.table("transactions")
-            .select("gateway_transaction_id")
-            .eq("payment_gateway", "paypal")
-            .eq("gateway_transaction_id", transaction_id)
-            .limit(1)
-            .execute()
-        )
-        if prior.data:
-            return WebhookResponse(
-                success=True,
-                message="Verified PayPal capture was already recorded.",
-                details={"transaction_id": transaction_id, "duplicate": True},
-            )
-
-        profile_result = supabase.table("profiles").select("user_id").eq("user_id", target_user_id).limit(1).execute()
-        if not profile_result.data:
-            raise HTTPException(status_code=404, detail="The paid account does not exist.")
-
-        ledger_result = supabase.table("usage_ledger").select("profile_id").eq("profile_id", target_user_id).limit(1).execute()
-        if not ledger_result.data:
-            raise HTTPException(status_code=503, detail="The account usage ledger is not provisioned.")
-
-        supabase.table("transactions").insert({
-            "profile_id": target_user_id,
-            "payment_gateway": "paypal",
-            "gateway_transaction_id": transaction_id,
-            "amount_paid": amount_val,
+        result = supabase.rpc("apply_paypal_capture", {
+            "p_user_id": target_user_id,
+            "p_transaction_id": transaction_id,
+            "p_amount_paid": amount_val,
+            "p_assigned_tier": assigned_tier,
         }).execute()
-        supabase.table("profiles").update({
-            "current_tier": assigned_tier,
-            "status": "active",
-        }).eq("user_id", target_user_id).execute()
-
-        logger.info("Verified PayPal capture recorded and tier updated for account %s.", target_user_id)
+        result_data = result.data if isinstance(result.data, dict) else {}
+        logger.info(
+            "Verified PayPal capture processed for account %s (duplicate=%s).",
+            target_user_id,
+            bool(result_data.get("duplicate", False)),
+        )
         return WebhookResponse(
             success=True,
-            message="Verified PayPal capture recorded and account tier updated.",
-            details={"transaction_id": transaction_id, "user_id": target_user_id, "tier": assigned_tier},
+            message="Verified PayPal capture recorded and account tier synchronized.",
+            details={
+                "transaction_id": transaction_id,
+                "user_id": target_user_id,
+                "tier": assigned_tier,
+                "duplicate": bool(result_data.get("duplicate", False)),
+            },
         )
     except HTTPException:
         raise
