@@ -1,3 +1,35 @@
+-- Tables used by authenticated PayPal checkout and persisted customer reports.
+create table if not exists public.paypal_orders (
+  id uuid primary key default gen_random_uuid(),
+  paypal_order_id text not null unique,
+  user_id uuid not null references public.profiles(user_id) on delete cascade,
+  tier public.subscription_tier not null,
+  amount numeric(10,2) not null check (amount in (51.00,83.00,129.00)),
+  status text not null default 'pending' check (status in ('pending','captured','failed')),
+  capture_id text unique,
+  created_at timestamptz not null default now(),
+  captured_at timestamptz
+);
+alter table public.paypal_orders enable row level security;
+revoke all on public.paypal_orders from anon, authenticated;
+grant select, insert, update, delete on public.paypal_orders to service_role;
+create index if not exists paypal_orders_user_created_idx on public.paypal_orders(user_id, created_at desc);
+
+create table if not exists public.automation_jobs (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid not null references public.profiles(user_id) on delete cascade,
+  job_type text not null,
+  input_filename text not null,
+  status text not null default 'completed' check (status in ('queued','running','completed','failed')),
+  result jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+alter table public.automation_jobs enable row level security;
+revoke all on public.automation_jobs from anon, authenticated;
+grant select, insert, update, delete on public.automation_jobs to service_role;
+create index if not exists automation_jobs_profile_created_idx on public.automation_jobs(profile_id, created_at desc);
+
 -- Applied to Supabase project erfkjxrcyfrvtqfnmuqq as migration
 -- 20261027085802_autoops_paypal_atomic_capture.
 -- Keep this file aligned with the deployed database migration.
