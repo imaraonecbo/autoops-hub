@@ -12,12 +12,13 @@ import hashlib
 import json
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from supabase import create_client, Client
 import httpx
 from uuid import UUID
+from datetime import datetime, timezone
 
 # Initialize elite structured logging
 logging.basicConfig(
@@ -540,7 +541,7 @@ async function viewJob(id){try{const d=await api('/api/v1/jobs/'+encodeURICompon
 </script></body></html>''')
 
 @app.post("/api/v1/auth/signup")
-async def auth_signup(payload: Dict[str, Any], response):
+async def auth_signup(payload: Dict[str, Any], response: Response):
     email = str(payload.get("email", "")).strip().lower()
     password = str(payload.get("password", ""))
     if "@" not in email or len(password) < 10:
@@ -552,7 +553,7 @@ async def auth_signup(payload: Dict[str, Any], response):
     return {"message": "Account created. Check your email to confirm it, then sign in.", "user": None}
 
 @app.post("/api/v1/auth/login")
-async def auth_login(payload: Dict[str, Any], response):
+async def auth_login(payload: Dict[str, Any], response: Response):
     email = str(payload.get("email", "")).strip().lower()
     password = str(payload.get("password", ""))
     auth_data = await _supabase_auth_call("token?grant_type=password", {"email": email, "password": password})
@@ -562,7 +563,7 @@ async def auth_login(payload: Dict[str, Any], response):
     return {"message": "Signed in.", "user": {"id": auth_data.get("user", {}).get("id"), "email": auth_data.get("user", {}).get("email")}}
 
 @app.post("/api/v1/auth/logout")
-async def auth_logout(response):
+async def auth_logout(response: Response):
     response.delete_cookie("autoops_session", path="/", secure=True, httponly=True, samesite="lax")
     return {"success": True, "message": "Signed out."}
 
@@ -696,7 +697,7 @@ async def capture_paypal_order(request: Request, payload: Dict[str, Any]):
             "p_amount_paid": float(saved["amount"]), "p_assigned_tier": saved["tier"],
         }).execute()
         supabase.table("paypal_orders").update({
-            "status": "captured", "capture_id": cap["id"], "captured_at": "now()"
+            "status": "captured", "capture_id": cap["id"], "captured_at": datetime.now(timezone.utc).isoformat()
         }).eq("paypal_order_id", order_id).execute()
         return {"success": True, "message": "Sandbox payment captured and account tier updated.", "tier": saved["tier"], "capture_id": cap["id"], "database_result": applied.data}
     except HTTPException:
