@@ -62,6 +62,35 @@ class PayPalWebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 401)
 
 
+
+    async def test_verifier_uses_paypal_api_and_requires_success(self):
+        headers = {
+            "PAYPAL-TRANSMISSION-ID": "transmission-id",
+            "PAYPAL-TRANSMISSION-TIME": "2026-10-27T09:00:00Z",
+            "PAYPAL-TRANSMISSION-SIG": "signature",
+            "PAYPAL-CERT-URL": "https://api.paypal.com/cert",
+            "PAYPAL-AUTH-ALGO": "SHA256withRSA",
+        }
+        token_response = MagicMock()
+        token_response.json.return_value = {"access_token": "test-access-token"}
+        verify_response = MagicMock()
+        verify_response.json.return_value = {"verification_status": "SUCCESS"}
+        fake_client = MagicMock()
+        fake_client.post = AsyncMock(side_effect=[token_response, verify_response])
+        fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+        fake_client.__aexit__ = AsyncMock(return_value=False)
+        with (
+            patch.object(app_module, "PAYPAL_CLIENT_ID", "configured-client"),
+            patch.object(app_module, "PAYPAL_CLIENT_SECRET", "configured-secret"),
+            patch.object(app_module, "PAYPAL_WEBHOOK_ID", "WH-configured"),
+            patch.object(app_module.httpx, "AsyncClient", return_value=fake_client),
+        ):
+            await app_module.verify_paypal_signature(make_request(headers=headers), {"id": "EVENT-1"})
+        self.assertEqual(fake_client.post.await_count, 2)
+        verification_call = fake_client.post.await_args_list[1]
+        self.assertTrue(verification_call.args[0].endswith("/v1/notifications/verify-webhook-signature"))
+        self.assertEqual(verification_call.kwargs["json"]["webhook_event"], {"id": "EVENT-1"})
+
     async def test_verified_capture_uses_atomic_database_rpc(self):
         user_id = "00000000-0000-0000-0000-000000000123"
         event = {
