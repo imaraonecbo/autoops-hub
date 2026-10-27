@@ -251,12 +251,14 @@ async def clean_csv(
             "formatted_result": cleaned_csv_result
         }
 
-    except Exception as e:
-        logger.error(f"Data formatting exception encountered for user_id {user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"CSV processing failed during column parsing: {str(e)}"
-        )
+    except HTTPException:
+        raise
+    except (UnicodeDecodeError, csv.Error, ValueError) as e:
+        logger.warning("CSV validation failed for user_id %s: %s", user_id, str(e))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"CSV processing failed: {str(e)}")
+    except Exception:
+        logger.exception("CSV job failed for user_id %s.", user_id)
+        raise HTTPException(status_code=503, detail="CSV processing failed unexpectedly. Please retry; no successful report was returned.")
 
 @app.post("/api/v1/automation/bot-webhook", response_model=WebhookResponse)
 async def bot_webhook(
