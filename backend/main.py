@@ -68,8 +68,32 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
 PAYPAL_WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "").strip()
 PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "").strip()
 PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_CLIENT_SECRET", "").strip()
-PAYPAL_API_BASE = os.getenv("PAYPAL_API_BASE", "https://api-m.sandbox.paypal.com").rstrip("/")
+PAYPAL_SANDBOX_API_BASE = "https://api-m.sandbox.paypal.com"
+PAYPAL_LIVE_API_BASE = "https://api-m.paypal.com"
+PAYPAL_API_BASE = os.getenv("PAYPAL_API_BASE", PAYPAL_SANDBOX_API_BASE).rstrip("/")
+PAYPAL_LIVE_ENABLED = os.getenv("PAYPAL_LIVE_ENABLED", "false").strip().lower() in {"true", "1", "yes"}
 COINBASE_WEBHOOK_SECRET = os.getenv("COINBASE_WEBHOOK_SECRET", "").strip()
+
+def _paypal_credentials_configured() -> bool:
+    values = (PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_WEBHOOK_ID)
+    return all(value and "placeholder" not in value.lower() and "unconfigured" not in value.lower()
+               for value in values)
+
+def _paypal_mode() -> str:
+    if PAYPAL_API_BASE == PAYPAL_LIVE_API_BASE:
+        return "live"
+    if PAYPAL_API_BASE == PAYPAL_SANDBOX_API_BASE:
+        return "sandbox"
+    return "invalid"
+
+def _assert_paypal_runtime_ready() -> None:
+    mode = _paypal_mode()
+    if mode == "invalid":
+        raise HTTPException(status_code=503, detail="PayPal API host is not an approved Sandbox or Live endpoint.")
+    if not _paypal_credentials_configured():
+        raise HTTPException(status_code=503, detail="PayPal credentials are not fully configured for this environment.")
+    if mode == "live" and not PAYPAL_LIVE_ENABLED:
+        raise HTTPException(status_code=503, detail="Live checkout is deliberately disabled until production credentials and merchant configuration are verified.")
 
 supabase: Optional[Client] = None
 if SUPABASE_URL and SUPABASE_KEY and "placeholder" not in SUPABASE_URL.lower() and "placeholder" not in SUPABASE_KEY.lower() and "unconfigured" not in SUPABASE_KEY.lower():
@@ -382,8 +406,7 @@ async def process_supported_file(
 
 async def verify_paypal_signature(request: Request, event: Dict[str, Any]) -> None:
     """Ask PayPal's official verification API to validate the exact webhook headers and event."""
-    if not PAYPAL_CLIENT_ID or not PAYPAL_CLIENT_SECRET or not PAYPAL_WEBHOOK_ID or "PLACEHOLDER" in PAYPAL_WEBHOOK_ID.upper() or "UNCONFIGURED" in PAYPAL_WEBHOOK_ID.upper():
-        raise HTTPException(status_code=503, detail="PayPal webhook verification is not configured.")
+    _assert_paypal_runtime_ready()
 
     header_names = {
         "transmission_id": "PAYPAL-TRANSMISSION-ID",
@@ -679,7 +702,16 @@ def _set_session_cookie(response, auth_data: Dict[str, Any]) -> None:
 @app.get("/api/v1/health")
 async def health_check():
     """Non-sensitive readiness probe; checks actual PostgREST connectivity."""
-    result = {"status": "ok", "database_configured": bool(supabase), "database_reachable": False}
+    mode = _paypal_mode()
+    paypal_ready = _paypal_credentials_configured() and mode != "invalid" and (mode != "live" or PAYPAL_LIVE_ENABLED)
+    result = {
+        "status": "ok",
+        "database_configured": bool(supabase),
+        "database_reachable": False,
+        "payment_mode": mode,
+        "paypal_credentials_configured": _paypal_credentials_configured(),
+        "paypal_checkout_enabled": paypal_ready,
+    }
     if supabase is not None:
         try:
             supabase.table("profiles").select("user_id").limit(1).execute()
@@ -886,8 +918,7 @@ async def auth_me(request: Request):
     return {"user": {"id": user["user_id"], "email": user.get("email")}, "profile": profile.data[0] if profile.data else None}
 
 async def _paypal_access_token() -> str:
-    if not PAYPAL_CLIENT_ID or not PAYPAL_CLIENT_SECRET or not PAYPAL_WEBHOOK_ID:
-        raise HTTPException(status_code=503, detail="PayPal Sandbox credentials are not fully configured.")
+    _assert_paypal_runtime_ready()
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             r = await client.post(f"{PAYPAL_API_BASE}/v1/oauth2/token",
@@ -903,7 +934,7 @@ async def _paypal_access_token() -> str:
         raise
     except Exception:
         logger.exception("PayPal OAuth failed.")
-        raise HTTPException(status_code=503, detail="PayPal Sandbox authentication failed; check that all credentials belong to the same Sandbox app.")
+        raise HTTPException(status_code=503, detail="PayPal authentication failed; verify the credentials belong to the selected environment and REST app.")
 
 @app.post("/api/v1/payments/paypal/order")
 async def create_paypal_order(request: Request, payload: Dict[str, Any]):
@@ -955,7 +986,7 @@ async def create_paypal_order(request: Request, payload: Dict[str, Any]):
         raise
     except Exception:
         logger.exception("PayPal order creation failed.")
-        raise HTTPException(status_code=502, detail="Could not create a PayPal order. Check Sandbox configuration and retry.")
+        raise HTTPException(status_code=502, detail="Could not create a PayPal order. Check the configured PayPal environment and credentials, then retry.")
 
 @app.post("/api/v1/payments/paypal/capture")
 async def capture_paypal_order(request: Request, payload: Dict[str, Any]):
