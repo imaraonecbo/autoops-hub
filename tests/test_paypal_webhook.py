@@ -97,7 +97,7 @@ class PayPalWebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
             "event_type": "PAYMENT.CAPTURE.COMPLETED",
             "resource": {
                 "id": "CAPTURE-TEST-123",
-                "amount": {"value": "51.00", "currency_code": "USD"},
+                "amount": {"value": "79.00", "currency_code": "USD"},
                 "custom_id": user_id,
                 "supplementary_data": {"related_ids": {"order_id": "ORDER-TEST-123"}},
             },
@@ -107,7 +107,7 @@ class PayPalWebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
             "paypal_order_id": "ORDER-TEST-123",
             "user_id": user_id,
             "tier": "tier_1_51",
-            "amount": 51.0,
+            "amount": 79.0,
             "status": "pending",
             "capture_id": None,
         }]
@@ -126,7 +126,7 @@ class PayPalWebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
         fake_db.rpc.assert_called_once_with("apply_paypal_capture", {
             "p_user_id": user_id,
             "p_transaction_id": "CAPTURE-TEST-123",
-            "p_amount_paid": 51.0,
+            "p_amount_paid": 79.0,
             "p_assigned_tier": "tier_1_51",
         })
 
