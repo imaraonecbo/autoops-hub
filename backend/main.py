@@ -265,15 +265,23 @@ async def bot_webhook(
         )
 
     try:
-        # Update usage counter following webhook execution
-        next_credits = current_credits + 1
-        supabase.table("usage_ledger").update({
-            "monthly_credits_used": next_credits
-        }).eq("profile_id", user_id).execute()
-
-        supabase.rpc("increment_lifetime_jobs", {"uid": user_id}).execute()
-
-        logger.info(f"Webhook automated pipeline successfully triggered by script worker for user_id: {user_id}.")
+        # Persist the webhook result and consume the packaged job credit atomically.
+        saved = supabase.rpc("complete_automation_job", {
+            "p_user_id": user_id,
+            "p_job_type": "bot_webhook",
+            "p_input_filename": "programmatic-webhook",
+            "p_result": {
+                "task_action": payload.task_action,
+                "current_tier": security_context["current_tier"],
+                "source": "authenticated_bot_webhook",
+            },
+        }).execute()
+        saved_data = saved.data if isinstance(saved.data, dict) else (
+            saved.data[0] if isinstance(saved.data, list) and saved.data else {}
+        )
+        next_credits = saved_data.get("monthly_credits_used", current_credits + 1)
+        logger.info("Webhook job completed for user_id=%s; credits remaining=%s",
+                    user_id, saved_data.get("job_credits_remaining"))
         return WebhookResponse(
             success=True,
             message="Autonomous action pipeline loaded successfully. Job routed to scheduler context.",
