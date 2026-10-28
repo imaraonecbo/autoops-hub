@@ -317,12 +317,29 @@ async def process_supported_file(
     if await file.read(1):
         raise HTTPException(status_code=413, detail="File exceeds the 20 MB upload limit.")
     try:
-        processed = file_processors.process_data_file(
-            filename=file.filename,
-            content=content,
-            tier=security_context["current_tier"],
-            operation=operation,
-        )
+        # Keep the already-tested CSV algorithm as the canonical CSV path.
+        # The new dispatcher handles CSV only when a caller explicitly selects an
+        # Ultimate tabular workload such as catalog/order/identity normalization.
+        if extension == ".csv" and operation in {"auto", "csv_clean"}:
+            try:
+                legacy_csv = content.decode("utf-8-sig")
+                cleaned_csv = clean_csv_content(legacy_csv, security_context["current_tier"])
+            except (UnicodeDecodeError, csv.Error, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=f"CSV processing failed: {exc}")
+            processed = {
+                "job_type": "clean_csv",
+                "output_format": "csv",
+                "rows_cleaned": cleaned_csv["rows_cleaned"],
+                "formatted_result": cleaned_csv["formatted_result"],
+                "summary": cleaned_csv["summary"],
+            }
+        else:
+            processed = file_processors.process_data_file(
+                filename=file.filename,
+                content=content,
+                tier=security_context["current_tier"],
+                operation=operation,
+            )
         stored_result = {
             "output_format": processed.get("output_format", "json"),
             "rows_cleaned": processed.get("rows_cleaned", 0),
