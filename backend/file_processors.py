@@ -312,12 +312,13 @@ def _infer_types(value: Any) -> dict[str, Any]:
     walk(value)
     return {"node_type_counts": dict(counts), "paths": examples}
 
-def _parse_json(content: bytes, tier: str) -> dict[str, Any]:
+def _parse_json(content: bytes, tier: str, filter_anomalies: bool = False) -> dict[str, Any]:
     _require_tier(tier, 2, "JSON payload formatting")
     try:
         root = json.loads(content.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("JSON file is invalid or is not UTF-8 encoded.") from exc
+
     def clean(value: Any) -> Any:
         if isinstance(value, dict):
             return {_header(key): clean(child) for key, child in value.items()}
@@ -326,9 +327,26 @@ def _parse_json(content: bytes, tier: str) -> dict[str, Any]:
         if isinstance(value, str):
             return re.sub(r"[ \t]+", " ", value).strip()
         return value
+
+    def contains_anomaly(value: Any) -> bool:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if re.search(r"(error|exception|stack.?trace|fatal)", key, re.I) and child not in (None, "", [], {}):
+                    return True
+                if contains_anomaly(child):
+                    return True
+        elif isinstance(value, list):
+            return any(contains_anomaly(child) for child in value)
+        return False
+
     cleaned = clean(root)
-    entries = len(cleaned) if isinstance(cleaned, list) else 1
-    _check_row_limit(entries, tier)
+    entries_received = len(cleaned) if isinstance(cleaned, list) else 1
+    _check_row_limit(entries_received, tier)
+    if filter_anomalies:
+        if not isinstance(cleaned, list):
+            raise ValueError("JSON anomaly filtering requires a top-level array of records.")
+        cleaned = [record for record in cleaned if contains_anomaly(record)]
+
     anomaly_keys = 0
     def scan(value: Any) -> None:
         nonlocal anomaly_keys
@@ -341,12 +359,25 @@ def _parse_json(content: bytes, tier: str) -> dict[str, Any]:
             for child in value:
                 scan(child)
     scan(cleaned)
-    summary: dict[str, Any] = {"operation": "json_clean", "entries_processed": entries, "anomaly_fields_detected": anomaly_keys}
+
+    entries_returned = len(cleaned) if isinstance(cleaned, list) else 1
+    summary: dict[str, Any] = {
+        "operation": "json_filter_anomalies" if filter_anomalies else "json_clean",
+        "entries_received": entries_received,
+        "entries_returned": entries_returned,
+        "entries_filtered_out": entries_received - entries_returned if filter_anomalies else 0,
+        "anomaly_fields_detected": anomaly_keys,
+    }
     if TIER_RANK.get(tier, 0) >= 3:
         summary["type_summary"] = _infer_types(cleaned)
         summary["quality_flags"] = [f"{anomaly_keys} error/exception/stack-trace field(s) detected"] if anomaly_keys else []
-    return {"job_type": "json_payload_clean", "output_format": "json", "rows_cleaned": entries,
-            "formatted_result": json.dumps(cleaned, ensure_ascii=False, indent=2), "summary": summary}
+    return {
+        "job_type": "json_anomaly_filter" if filter_anomalies else "json_payload_clean",
+        "output_format": "json",
+        "rows_cleaned": entries_returned,
+        "formatted_result": json.dumps(cleaned, ensure_ascii=False, indent=2),
+        "summary": summary,
+    }
 
 def _parse_log(content: bytes, tier: str) -> dict[str, Any]:
     _require_tier(tier, 2, "Server log parsing")
@@ -398,13 +429,13 @@ def process_data_file(filename: str, content: bytes, tier: str, operation: str =
     ext = "." + filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
     if ext not in SUPPORTED_EXTENSIONS:
         raise ValueError("Supported file types: .csv, .xlsx, .xls, .json, and .log.")
-    allowed_ops = {"auto", "csv_clean", "excel_consolidate", "json_clean", "log_analyze", "catalog_normalize", "order_normalize", "identity_sanitize"}
+    allowed_ops = {"auto", "csv_clean", "excel_consolidate", "json_clean", "json_filter_anomalies", "log_analyze", "catalog_normalize", "order_normalize", "identity_sanitize"}
     if operation not in allowed_ops:
         raise ValueError("Unknown processing operation.")
     if ext == ".json":
-        if operation not in {"auto", "json_clean"}:
-            raise ValueError("Choose JSON payload formatting for .json files.")
-        return _parse_json(content, tier)
+        if operation not in {"auto", "json_clean", "json_filter_anomalies"}:
+            raise ValueError("Choose JSON payload formatting or anomaly filtering for .json files.")
+        return _parse_json(content, tier, filter_anomalies=operation == "json_filter_anomalies")
     if ext == ".log":
         if operation not in {"auto", "log_analyze"}:
             raise ValueError("Choose server log analysis for .log files.")
