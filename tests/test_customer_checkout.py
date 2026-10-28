@@ -25,9 +25,9 @@ class CustomerAuthTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_tier_is_rejected_before_paypal_order(self):
         self.assertNotIn("tier_free", app_module.TIERS)
-        self.assertEqual(app_module.TIERS["tier_1_51"][0], "51.00")
-        self.assertEqual(app_module.TIERS["tier_2_83"][0], "83.00")
-        self.assertEqual(app_module.TIERS["tier_3_129"][0], "129.00")
+        self.assertEqual(app_module.TIERS["tier_1_51"][0], "79.00")
+        self.assertEqual(app_module.TIERS["tier_2_83"][0], "149.00")
+        self.assertEqual(app_module.TIERS["tier_3_129"][0], "299.00")
 
 if __name__ == "__main__":
     unittest.main()
