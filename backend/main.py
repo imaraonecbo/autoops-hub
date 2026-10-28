@@ -12,7 +12,8 @@ import hashlib
 import json
 from typing import Dict, Any, Optional
 from urllib.parse import quote
-from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Request, status
+from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Form, Request, status
+from backend import file_processors
 from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -142,29 +143,30 @@ async def verify_user_and_credits(request: Request) -> Dict[str, Any]:
         profile_status_val = profile.get("status", "active")
         if profile_status_val != "active":
             raise HTTPException(status_code=403, detail=f"Subscription is currently '{profile_status_val}'.")
-        ledger_res = supabase.table("usage_ledger").select("monthly_credits_used,total_lifetime_jobs,last_reset_date").eq("profile_id", user_id).execute()
+        ledger_res = supabase.table("usage_ledger").select("monthly_credits_used,total_lifetime_jobs,job_credits_remaining,last_reset_date").eq("profile_id", user_id).execute()
         if not ledger_res.data:
             raise HTTPException(status_code=409, detail="Usage ledger is not provisioned for this account.")
         ledger = ledger_res.data[0]
         monthly_credits = int(ledger.get("monthly_credits_used", 0) or 0)
         lifetime_jobs = int(ledger.get("total_lifetime_jobs", 0) or 0)
+        credits_remaining = int(ledger.get("job_credits_remaining", 0) or 0)
         limits = TIER_LIMITS.get(current_tier, TIER_LIMITS["free"])
-        if lifetime_jobs >= limits["included_jobs"]:
+        if credits_remaining <= 0:
             raise HTTPException(status_code=402, detail={
-                "error": "Included job allowance exhausted",
+                "error": "Included job credits exhausted",
                 "current_tier": current_tier,
                 "total_lifetime_jobs": lifetime_jobs,
-                "included_job_limit": limits["included_jobs"],
-                "message": f"{limits['label']} includes {limits['included_jobs']:,} total jobs for this purchase tier.",
+                "job_credits_remaining": credits_remaining,
+                "message": "There are no remaining job credits on this account. Purchase a tier to add more credits.",
                 "pricing_options": {
-                    "tier_1_51": {"unit_price": 51.00, "tier_name": "Basic"},
-                    "tier_2_83": {"unit_price": 83.00, "tier_name": "Scale"},
-                    "tier_3_129": {"unit_price": 129.00, "tier_name": "Ultimate"}
+                    "tier_1_51": {"unit_price": 79.00, "tier_name": "Basic"},
+                    "tier_2_83": {"unit_price": 149.00, "tier_name": "Scale"},
+                    "tier_3_129": {"unit_price": 299.00, "tier_name": "Ultimate"}
                 }
             })
         return {"user_id": user_id, "email": auth_user.get("email"),
                 "current_tier": current_tier, "monthly_credits_used": monthly_credits,
-                "total_lifetime_jobs": lifetime_jobs,
+                "total_lifetime_jobs": lifetime_jobs, "job_credits_remaining": credits_remaining,
                 "included_job_limit": limits["included_jobs"], "max_rows": limits["max_rows"]}
     except HTTPException:
         raise
@@ -211,31 +213,24 @@ async def clean_csv(
         cleaned_csv_result = cleaned["formatted_result"]
         report_summary = cleaned["summary"]
 
-        # Increment usage only after a valid CSV has been processed.
-        next_credits = current_credits + 1
-        
-        supabase.table("usage_ledger").update({
-            "monthly_credits_used": next_credits
-        }).eq("profile_id", user_id).execute()
-
-        # Update lifetime counter using Postgrest raw modifier or rpc
-        supabase.rpc("increment_lifetime_jobs", {"uid": user_id}).execute()
-
-        job_record = supabase.table("automation_jobs").insert({
-            "profile_id": user_id,
-            "job_type": "clean_csv",
-            "input_filename": file.filename,
-            "status": "completed",
-            "result": {"rows_cleaned": cleaned_rows_count, "formatted_result": cleaned_csv_result, "summary": report_summary},
-            "completed_at": datetime.now(timezone.utc).isoformat(),
+        # Record the report and consume a purchased job credit in one DB transaction.
+        job_record = supabase.rpc("complete_automation_job", {
+            "p_user_id": user_id,
+            "p_job_type": "clean_csv",
+            "p_input_filename": file.filename,
+            "p_result": {"output_format": "csv", "rows_cleaned": cleaned_rows_count, "formatted_result": cleaned_csv_result, "summary": report_summary},
         }).execute()
-        job_id = job_record.data[0]["id"] if job_record.data else None
+        job_result = job_record.data if isinstance(job_record.data, dict) else (
+            job_record.data[0] if isinstance(job_record.data, list) and job_record.data else {}
+        )
+        job_id = job_result.get("job_id")
         logger.info(f"Successfully cleaned telemetry data log for user_id: {user_id}. Rows processed: {cleaned_rows_count}.")
         return {
             "success": True,
             "job_id": job_id,
             "rows_cleaned": cleaned_rows_count,
-            "credits_remaining": max(0, security_context.get("included_job_limit", 2) - (security_context.get("total_lifetime_jobs", 0) + 1)),
+            "credits_remaining": job_result.get("job_credits_remaining", max(0, security_context.get("job_credits_remaining", 0) - 1)),
+            "job_credits_remaining": job_result.get("job_credits_remaining", max(0, security_context.get("job_credits_remaining", 0) - 1)),
             "included_job_limit": security_context.get("included_job_limit", 2),
             "summary": report_summary,
             "formatted_result": cleaned_csv_result
@@ -294,6 +289,67 @@ async def bot_webhook(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Critical operation dispatch event error."
         )
+
+
+@app.post("/api/v1/automation/process-file", status_code=status.HTTP_200_OK)
+async def process_supported_file(
+    file: UploadFile = File(..., description="CSV, Excel, JSON, or server log input."),
+    operation: str = Form("auto"),
+    security_context: Dict[str, Any] = Depends(verify_user_and_credits),
+):
+    """Additive format-aware pipeline; the legacy /clean-csv route remains supported."""
+    user_id = security_context["user_id"]
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="A filename is required.")
+    extension = "." + file.filename.lower().rsplit(".", 1)[-1] if "." in file.filename else ""
+    if extension not in file_processors.SUPPORTED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Supported file types are .csv, .xlsx, .xls, .json, and .log.")
+    max_bytes = 20 * 1024 * 1024
+    content = await file.read(max_bytes)
+    if await file.read(1):
+        raise HTTPException(status_code=413, detail="File exceeds the 20 MB upload limit.")
+    try:
+        processed = file_processors.process_data_file(
+            filename=file.filename,
+            content=content,
+            tier=security_context["current_tier"],
+            operation=operation,
+        )
+        stored_result = {
+            "output_format": processed.get("output_format", "json"),
+            "rows_cleaned": processed.get("rows_cleaned", 0),
+            "formatted_result": processed.get("formatted_result", ""),
+            "summary": processed.get("summary", {}),
+            "operation": operation,
+        }
+        saved = supabase.rpc("complete_automation_job", {
+            "p_user_id": user_id,
+            "p_job_type": processed["job_type"],
+            "p_input_filename": file.filename,
+            "p_result": stored_result,
+        }).execute()
+        saved_data = saved.data if isinstance(saved.data, dict) else (
+            saved.data[0] if isinstance(saved.data, list) and saved.data else {}
+        )
+        logger.info("Completed file operation=%s extension=%s user_id=%s rows=%s",
+                    operation, extension, user_id, processed.get("rows_cleaned", 0))
+        return {
+            "success": True,
+            "job_id": saved_data.get("job_id"),
+            "job_type": processed["job_type"],
+            "output_format": processed.get("output_format", "json"),
+            "rows_cleaned": processed.get("rows_cleaned", 0),
+            "summary": processed.get("summary", {}),
+            "formatted_result": processed.get("formatted_result", ""),
+            "job_credits_remaining": saved_data.get("job_credits_remaining"),
+        }
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        logger.exception("Multi-format processing failed for user_id=%s filename=%s", user_id, file.filename)
+        raise HTTPException(status_code=503, detail="File processing failed. No successful report was returned.")
 
 # ----------------------------------------------------------------------------
 # 5. UNIFIED CHECKOUT & WEBHOOK ROUTER
@@ -463,15 +519,15 @@ async def crypto_webhook(request: Request):
 # Customer portal: sign-up, sign-in, PayPal checkout, job history and reports
 # ----------------------------------------------------------------------------
 TIERS = {
-    "tier_1_51": ("51.00", "Basic"),
-    "tier_2_83": ("83.00", "Scale"),
-    "tier_3_129": ("129.00", "Ultimate"),
+    "tier_1_51": ("79.00", "Basic"),
+    "tier_2_83": ("149.00", "Scale"),
+    "tier_3_129": ("299.00", "Ultimate"),
 }
 TIER_LIMITS = {
     "free": {"included_jobs": 2, "max_rows": 100, "label": "Free"},
-    "tier_1_51": {"included_jobs": 25, "max_rows": 1000, "label": "Basic"},
-    "tier_2_83": {"included_jobs": 250, "max_rows": 10000, "label": "Scale"},
-    "tier_3_129": {"included_jobs": 1000, "max_rows": 100000, "label": "Ultimate"},
+    "tier_1_51": {"included_jobs": 30, "max_rows": 2500, "label": "Basic"},
+    "tier_2_83": {"included_jobs": 300, "max_rows": 25000, "label": "Scale"},
+    "tier_3_129": {"included_jobs": 1500, "max_rows": 250000, "label": "Ultimate"},
 }
 
 def clean_csv_content(decoded_text: str, tier: str) -> Dict[str, Any]:
