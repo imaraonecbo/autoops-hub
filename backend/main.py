@@ -652,13 +652,16 @@ a{color:var(--blue)}.shell{max-width:1180px;margin:auto;padding:26px 22px 56px}.
 <article class="price-card featured"><div class="plan-name">SCALE</div><div class="price">$83</div><div class="once">USD · sandbox one-time test payment</div><ul><li><b>Everything in Basic, plus:</b></li><li>Up to 10,000 data rows per file</li><li>250 total CSV jobs included with this one-time purchase</li><li>Remove fully blank rows</li><li>Remove exact duplicate rows</li><li>Per-column missing-value counts</li><li>Detailed cleanup summary in each report</li></ul><button class="btn plan-select" data-tier="tier_2_83">Choose Scale</button></article>
 <article class="price-card"><div class="plan-name">ULTIMATE</div><div class="price">$129</div><div class="once">USD · sandbox one-time test payment</div><ul><li><b>Everything in Scale, plus:</b></li><li>Up to 100,000 data rows per file</li><li>1,000 total CSV jobs included with this one-time purchase</li><li>Column-level data type inference</li><li>Quality flags for missing values</li><li>Expanded column quality report</li><li>Saved, account-linked results and history</li></ul><button class="btn plan-select" data-tier="tier_3_129">Choose Ultimate</button></article>
 </div></section>
-<section class="workspace"><div class="card"><h2>Your account</h2><p class="sub">Create an account or sign in to securely associate payments and reports with you. Use a password of at least 10 characters.</p>
+<section class="workspace"><div class="card"><h2>Your account</h2><p class="sub">Your account details and payment access stay linked to your secure sign-in.</p>
+<div id="authControls">
 <div class="field"><label for="email">EMAIL ADDRESS</label><input id="email" type="email" autocomplete="email" placeholder="you@example.com"></div>
 <div class="field"><label for="password">PASSWORD</label><input id="password" type="password" autocomplete="current-password" minlength="10" placeholder="At least 10 characters"></div>
-<button class="btn" id="signupBtn">Create account</button><button class="btn secondary" id="loginBtn">Sign in</button><button class="btn ghost" id="logoutBtn">Sign out</button>
+<button class="btn" id="signupBtn">Create account</button><button class="btn secondary" id="loginBtn">Sign in</button>
+</div>
+<div id="signedInPanel" hidden><p class="sub" id="signedInLabel">You are signed in.</p><button class="btn ghost" id="logoutBtn">Sign out</button></div>
 <div class="notice" id="accountNotice" role="status" aria-live="polite"></div>
 <div class="field"><label for="tier">SELECT CHECKOUT TIER</label><select id="tier"><option value="tier_1_51">Basic — $51 USD</option><option value="tier_2_83">Scale — $83 USD</option><option value="tier_3_129">Ultimate — $129 USD</option></select></div>
-<button class="btn" id="checkoutBtn">Continue to PayPal Sandbox</button><p class="sub" style="margin:12px 0 0">A PayPal Sandbox buyer account is required. No live payment is taken from this staging site.</p>
+<button class="btn" id="checkoutBtn">Continue to PayPal Sandbox</button><p class="sub" style="margin:12px 0 0">Sandbox checkout only: sign in at PayPal using a <b>Sandbox personal/buyer test account</b> from the PayPal Developer Dashboard. Your normal live PayPal email/password will not sign in to the Sandbox. Sandbox payments do not reach your real-money PayPal balance.</p>
 </div>
 <div class="card"><h2>Submit a CSV job</h2><p class="sub">Upload a small CSV file to test the complete workflow. Only CSV files are accepted.</p>
 <div class="field"><label for="csv">CHOOSE YOUR CSV FILE</label><input id="csv" type="file" accept=".csv,text/csv"></div>
@@ -675,6 +678,7 @@ a{color:var(--blue)}.shell{max-width:1180px;margin:auto;padding:26px 22px 56px}.
 'use strict';
 const $=id=>document.getElementById(id);
 const accountNotice=$('accountNotice'),jobNotice=$('jobNotice'),reportList=$('reportList'),reportResult=$('reportResult');
+const authControls=$('authControls'),signedInPanel=$('signedInPanel'),signedInLabel=$('signedInLabel');
 function notice(el,message,type){el.textContent=message;el.className='notice show'+(type?' '+type:'')}
 function clearNotice(el){el.textContent='';el.className='notice'}
 function errorMessage(data,status){if(data&&typeof data.detail==='string')return data.detail;if(data&&data.detail&&typeof data.detail==='object')return JSON.stringify(data.detail);if(data&&data.message)return data.message;return 'Request failed ('+status+'). Please try again.'}
@@ -682,9 +686,245 @@ async function api(path,options){const response=await fetch(path,Object.assign({
 async function busy(button,work){if(button.disabled)return;const old=button.textContent;button.disabled=true;button.textContent='Please wait…';try{await work()}catch(e){notice(button.id==='submitJobBtn'||button.id==='refreshBtn'?jobNotice:accountNotice,e.message||'Something went wrong. Please try again.','error')}finally{button.disabled=false;button.textContent=old}}
 function credentials(){const email=$('email').value.trim(),password=$('password').value;if(!email||email.indexOf('@')<1)throw new Error('Enter a valid email address first.');if(password.length<10)throw new Error('Use a password of at least 10 characters.');return {email:email,password:password}}
 async function authenticate(mode){const body=credentials();const data=await api('/api/v1/auth/'+mode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});notice(accountNotice,data.message||'Authentication request completed.','good');if(data.user){await loadAccount();await loadReports()}}
-async function loadAccount(){try{const data=await api('/api/v1/auth/me');const tier=data.profile&&data.profile.current_tier?data.profile.current_tier:'not provisioned';notice(accountNotice,'Signed in as '+(data.user.email||data.user.id)+'. Current access tier: '+tier+'.','good')}catch(e){notice(accountNotice,e.message,'error')}}
-async function logout(){await api('/api/v1/auth/logout',{method:'POST'});notice(accountNotice,'Signed out of this browser.','good');reportList.className='report-empty';reportList.textContent='Sign in to load your private report history.';reportResult.replaceChildren()}
-async function checkout(){const data=await api('/api/v1/payments/paypal/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:$('tier').value})});if(!data.approval_url)throw new Error('PayPal did not return an approval link. Check Sandbox credentials and try again.');notice(accountNotice,'Opening PayPal Sandbox for $'+data.amount+' USD…','good');window.location.assign(data.approval_url)}
+async function loadAccount(){try{const data=await api('/api/v1/auth/me');const tier=data.profile&&data.profile.current_tier?data.profile.current_tier:'not provisioned';authControls.hidden=true;signedInPanel.hidden=false;signedInLabel.textContent='Signed in as '+(data.user.email||data.user.id)+'. Current access tier: '+tier+'.';notice(accountNotice,'You are inside your account. Choose a plan or submit a CSV job below.','good');return true}catch(e){authControls.hidden=false;signedInPanel.hidden=true;notice(accountNotice,e.message,'error');return false}}
+async function logout(){await api('/api/v1/auth/logout',{method:'POST'});reportList.className='report-empty';reportList.textContent='Sign in to load your private report history.';reportResult.replaceChildren();await loadAccount();notice(accountNotice,'You have signed out. Sign in again to access private reports or checkout.','good')}
+async function checkout(){const signedIn=await loadAccount();if(!signedIn)throw new Error('Please sign in to AutoOps Hub first. The checkout will be linked to the account currently signed in.');const data=await api('/api/v1/payments/paypal/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:$('tier').value})});if(!data.approval_url)throw new Error('PayPal did not return an approval link. Check Sandbox credentials and try again.');let approval;try{approval=new URL(data.approval_url)}catch(e){throw new Error('PayPal returned an invalid approval URL. No redirect was attempted.')}if(approval.protocol!=='https:'||!['www.sandbox.paypal.com','sandbox.paypal.com'].includes(approval.hostname))throw new Error('PayPal did not return a valid Sandbox approval link. Please contact support; no redirect was attempted.');notice(accountNotice,'Sandbox order created for 
+async function captureReturned(){const orderId=new URLSearchParams(window.location.search).get('token');if(!orderId)throw new Error('No PayPal order token was found. Start checkout and return here after approving the Sandbox payment.');const data=await api('/api/v1/payments/paypal/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:orderId})});window.history.replaceState({},'',window.location.pathname);notice(accountNotice,data.message||'Payment verification completed.','good');await loadAccount();await loadReports()}
+async function handleAuthCallback(){const hash=new URLSearchParams(window.location.hash.replace(/^#/,''));const query=new URLSearchParams(window.location.search);const accessToken=hash.get('access_token')||query.get('access_token');const authError=hash.get('error_description')||query.get('error_description')||hash.get('error')||query.get('error');if(authError)throw new Error('Email confirmation did not complete: '+authError.replace(/\+/g,' '));if(accessToken){const data=await api('/api/v1/auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:accessToken})});window.history.replaceState({},'',window.location.pathname);notice(accountNotice,data.message||'Email confirmed. You are signed in.','good');await loadAccount();await loadReports();return true}if(query.get('auth')==='confirmed'){notice(accountNotice,'Email confirmed. Sign in below to continue.','good');window.history.replaceState({},'',window.location.pathname);return true}return false}
+async function submitJob(){const file=$('csv').files&&$('csv').files[0];if(!file)throw new Error('Choose a CSV file before submitting the job.');if(!file.name.toLowerCase().endsWith('.csv'))throw new Error('Please choose a file ending in .csv.');const form=new FormData();form.append('file',file);const data=await api('/api/v1/automation/clean-csv',{method:'POST',body:form});notice(jobNotice,'Job completed. '+data.rows_cleaned+' data rows processed.','good');showResult('Latest cleaned CSV',data.formatted_result||JSON.stringify(data,null,2));await loadReports()}
+function showResult(title,value){reportResult.replaceChildren();const heading=document.createElement('h3');heading.textContent=title;heading.style.fontSize='14px';const pre=document.createElement('pre');pre.className='result-box';pre.textContent=value;reportResult.append(heading,pre)}
+async function loadReports(){const data=await api('/api/v1/jobs');const jobs=data.jobs||[];reportList.replaceChildren();if(!jobs.length){reportList.className='report-empty';reportList.textContent='No reports yet. Submit a CSV job to create your first report.';return}reportList.className='report-list';jobs.forEach(job=>{const row=document.createElement('article');row.className='report-row';const head=document.createElement('div');head.className='report-row-head';const title=document.createElement('strong');title.textContent=(job.job_type||'Automation job').replace(/_/g,' ');const state=document.createElement('span');state.className='tag';state.textContent=job.status||'unknown';head.append(title,state);const meta=document.createElement('small');meta.textContent='Created: '+(job.created_at||'time unavailable')+' · Report ID: '+job.id;const view=document.createElement('button');view.className='btn secondary small';view.textContent='Open report';view.addEventListener('click',()=>busy(view,async()=>{const full=await api('/api/v1/jobs/'+encodeURIComponent(job.id));showResult('Report · '+job.id,JSON.stringify(full.job.result,null,2));notice(jobNotice,'Report loaded.','good')}));row.append(head,meta,view);reportList.append(row)})}
+$('signupBtn').addEventListener('click',()=>busy($('signupBtn'),()=>authenticate('signup')));
+$('loginBtn').addEventListener('click',()=>busy($('loginBtn'),()=>authenticate('login')));
+$('logoutBtn').addEventListener('click',()=>busy($('logoutBtn'),logout));
+$('checkoutBtn').addEventListener('click',()=>busy($('checkoutBtn'),checkout));
+$('submitJobBtn').addEventListener('click',()=>busy($('submitJobBtn'),submitJob));
+$('refreshBtn').addEventListener('click',()=>busy($('refreshBtn'),loadReports));
+document.querySelectorAll('.plan-select').forEach(button=>button.addEventListener('click',()=>{$('tier').value=button.dataset.tier;document.querySelectorAll('.plan-select').forEach(b=>b.textContent='Choose '+b.dataset.tier.replace('tier_1_51','Basic').replace('tier_2_83','Scale').replace('tier_3_129','Ultimate'));button.textContent='Selected';$('tier').scrollIntoView({behavior:'smooth',block:'center'});notice(accountNotice,'Selected '+button.textContent.replace('Selected','plan')+'. Sign in before continuing to PayPal.')})); 
+(async()=>{try{if(await handleAuthCallback())return;const query=new URLSearchParams(window.location.search);if(query.get('payment')==='success'&&query.get('token')){await captureReturned();return}if(query.get('payment')==='cancelled'){notice(accountNotice,'PayPal checkout was cancelled. No payment was captured. You can choose a plan and try again.');window.history.replaceState({},'',window.location.pathname)}await loadAccount();await loadReports()}catch(e){notice(accountNotice,e.message,'error')}})();
+})();
+</script>
+</body></html>''')
+
+@app.post("/api/v1/auth/signup")
+async def auth_signup(payload: Dict[str, Any], response: Response):
+    email = str(payload.get("email", "")).strip().lower()
+    password = str(payload.get("password", ""))
+    if "@" not in email or len(password) < 10:
+        raise HTTPException(status_code=400, detail="Enter a valid email and a password of at least 10 characters.")
+    public_app_url = os.getenv("PUBLIC_APP_URL", "https://autoops-hub-staging.onrender.com").rstrip("/")
+    confirmation_redirect = f"{public_app_url}/?auth=confirmed"
+    auth_path = "signup?redirect_to=" + quote(confirmation_redirect, safe="")
+    auth_data = await _supabase_auth_call(auth_path, {"email": email, "password": password})
+    if auth_data.get("access_token"):
+        _set_session_cookie(response, auth_data)
+        return {"message": "Account created and signed in.", "user": {"id": auth_data.get("user", {}).get("id"), "email": email}}
+    return {"message": "Account created. Check your email to confirm it, then sign in.", "user": None}
+
+@app.post("/api/v1/auth/session")
+async def auth_session(payload: Dict[str, Any], response: Response):
+    """Exchange a Supabase email-confirmation access token for an HttpOnly app session cookie."""
+    access_token = str(payload.get("access_token", "")).strip()
+    if not access_token or len(access_token) > 8192:
+        raise HTTPException(status_code=400, detail="A valid confirmation session token is required.")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            verified = await client.get(
+                f"{SUPABASE_URL.rstrip('/')}/auth/v1/user",
+                headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {access_token}"},
+            )
+        if verified.status_code != 200:
+            raise HTTPException(status_code=401, detail="The confirmation link is expired or invalid. Please sign in again.")
+        _set_session_cookie(response, {"access_token": access_token, "expires_in": 3600})
+        user = verified.json()
+        return {"success": True, "message": "Email confirmed. You are signed in.", "user": {"id": user.get("id"), "email": user.get("email")}}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Supabase confirmation session exchange failed.")
+        raise HTTPException(status_code=503, detail="Could not complete email confirmation. Please sign in again.")
+
+@app.post("/api/v1/auth/login")
+async def auth_login(payload: Dict[str, Any], response: Response):
+    email = str(payload.get("email", "")).strip().lower()
+    password = str(payload.get("password", ""))
+    auth_data = await _supabase_auth_call("token?grant_type=password", {"email": email, "password": password})
+    if not auth_data.get("access_token"):
+        raise HTTPException(status_code=401, detail="Sign-in did not return a session.")
+    _set_session_cookie(response, auth_data)
+    return {"message": "Signed in.", "user": {"id": auth_data.get("user", {}).get("id"), "email": auth_data.get("user", {}).get("email")}}
+
+@app.post("/api/v1/auth/logout")
+async def auth_logout(response: Response):
+    response.delete_cookie("autoops_session", path="/", secure=True, httponly=True, samesite="lax")
+    return {"success": True, "message": "Signed out."}
+
+@app.get("/api/v1/auth/me")
+async def auth_me(request: Request):
+    user = await get_authenticated_user(request)
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database is not connected.")
+    profile = supabase.table("profiles").select("current_tier,status").eq("user_id", user["user_id"]).execute()
+    return {"user": {"id": user["user_id"], "email": user.get("email")}, "profile": profile.data[0] if profile.data else None}
+
+async def _paypal_access_token() -> str:
+    if not PAYPAL_CLIENT_ID or not PAYPAL_CLIENT_SECRET or not PAYPAL_WEBHOOK_ID:
+        raise HTTPException(status_code=503, detail="PayPal Sandbox credentials are not fully configured.")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            r = await client.post(f"{PAYPAL_API_BASE}/v1/oauth2/token",
+                auth=(PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET),
+                data={"grant_type": "client_credentials"},
+                headers={"Accept": "application/json"})
+            r.raise_for_status()
+            token = r.json().get("access_token")
+            if not token:
+                raise HTTPException(status_code=503, detail="PayPal did not issue an access token.")
+            return token
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("PayPal OAuth failed.")
+        raise HTTPException(status_code=503, detail="PayPal Sandbox authentication failed; check that all credentials belong to the same Sandbox app.")
+
+@app.post("/api/v1/payments/paypal/order")
+async def create_paypal_order(request: Request, payload: Dict[str, Any]):
+    user = await get_authenticated_user(request)
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database is not connected.")
+    tier = str(payload.get("tier", ""))
+    if tier not in TIERS:
+        raise HTTPException(status_code=400, detail="Unknown plan.")
+    profile = supabase.table("profiles").select("user_id").eq("user_id", user["user_id"]).execute()
+    ledger = supabase.table("usage_ledger").select("profile_id").eq("profile_id", user["user_id"]).execute()
+    if not profile.data or not ledger.data:
+        raise HTTPException(status_code=409, detail="Account profile/usage ledger is missing; cannot create a checkout.")
+    amount, label = TIERS[tier]
+    token = await _paypal_access_token()
+    base_url = os.getenv("PUBLIC_APP_URL", "https://autoops-hub-staging.onrender.com").rstrip("/")
+    payload = {
+        "intent": "CAPTURE",
+        "purchase_units": [{
+            "reference_id": tier,
+            "custom_id": user["user_id"],
+            "description": f"AutoOps Hub {label} plan",
+            "amount": {"currency_code": "USD", "value": amount},
+        }],
+        "application_context": {
+            "brand_name": "AutoOps Hub",
+            "user_action": "PAY_NOW",
+            "return_url": f"{base_url}/?payment=success",
+            "cancel_url": f"{base_url}/?payment=cancelled",
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
+            r = await client.post(f"{PAYPAL_API_BASE}/v2/checkout/orders",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=payload)
+            r.raise_for_status()
+            order = r.json()
+        order_id = order.get("id")
+        approval = next((x.get("href") for x in order.get("links", []) if x.get("rel") in ("approve", "payer-action")), None)
+        if not order_id or not approval:
+            raise HTTPException(status_code=502, detail="PayPal did not return a valid approval URL.")
+        supabase.table("paypal_orders").insert({
+            "paypal_order_id": order_id, "user_id": user["user_id"],
+            "tier": tier, "amount": float(amount), "status": "pending"
+        }).execute()
+        return {"order_id": order_id, "approval_url": approval, "tier": tier, "amount": amount, "currency": "USD"}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("PayPal order creation failed.")
+        raise HTTPException(status_code=502, detail="Could not create a PayPal order. Check Sandbox configuration and retry.")
+
+@app.post("/api/v1/payments/paypal/capture")
+async def capture_paypal_order(request: Request, payload: Dict[str, Any]):
+    user = await get_authenticated_user(request)
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database is not connected.")
+    order_id = str(payload.get("order_id", "")).strip()
+    if not order_id or len(order_id) > 128:
+        raise HTTPException(status_code=400, detail="A valid PayPal order ID is required.")
+    rows = supabase.table("paypal_orders").select("*").eq("paypal_order_id", order_id).eq("user_id", user["user_id"]).execute()
+    if not rows.data:
+        raise HTTPException(status_code=404, detail="This PayPal order does not belong to your signed-in account.")
+    saved = rows.data[0]
+    if saved.get("status") == "captured":
+        return {"success": True, "message": "This payment was already processed.", "tier": saved.get("tier"), "duplicate": True}
+    token = await _paypal_access_token()
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
+            check = await client.get(f"{PAYPAL_API_BASE}/v2/checkout/orders/{order_id}",
+                headers={"Authorization": f"Bearer {token}"})
+            check.raise_for_status()
+            order = check.json()
+            if order.get("status") != "APPROVED":
+                raise HTTPException(status_code=409, detail="PayPal order is not approved yet.")
+            units = order.get("purchase_units") or []
+            if len(units) != 1:
+                raise HTTPException(status_code=400, detail="Unexpected PayPal purchase-unit count.")
+            unit = units[0]
+            amt = unit.get("amount") or {}
+            if unit.get("custom_id") != user["user_id"] or unit.get("reference_id") != saved["tier"]:
+                raise HTTPException(status_code=400, detail="PayPal order ownership/tier mismatch.")
+            if amt.get("currency_code") != "USD" or amt.get("value") != f'{float(saved["amount"]):.2f}':
+                raise HTTPException(status_code=400, detail="PayPal order amount does not match the recorded plan.")
+            captured = await client.post(f"{PAYPAL_API_BASE}/v2/checkout/orders/{order_id}/capture",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json={})
+            captured.raise_for_status()
+            capture_data = captured.json()
+        if capture_data.get("status") != "COMPLETED":
+            raise HTTPException(status_code=409, detail="PayPal has not completed the capture.")
+        captures = (((capture_data.get("purchase_units") or [{}])[0].get("payments") or {}).get("captures") or [])
+        if not captures or captures[0].get("status") != "COMPLETED":
+            raise HTTPException(status_code=409, detail="No completed PayPal capture was returned.")
+        cap = captures[0]
+        cap_amount = cap.get("amount") or {}
+        if cap_amount.get("currency_code") != "USD" or cap_amount.get("value") != f'{float(saved["amount"]):.2f}':
+            raise HTTPException(status_code=400, detail="Captured amount does not match the recorded plan.")
+        applied = supabase.rpc("apply_paypal_capture", {
+            "p_user_id": user["user_id"], "p_transaction_id": cap["id"],
+            "p_amount_paid": float(saved["amount"]), "p_assigned_tier": saved["tier"],
+        }).execute()
+        supabase.table("paypal_orders").update({
+            "status": "captured", "capture_id": cap["id"], "captured_at": datetime.now(timezone.utc).isoformat()
+        }).eq("paypal_order_id", order_id).execute()
+        return {"success": True, "message": "Sandbox payment captured and account tier updated.", "tier": saved["tier"], "capture_id": cap["id"], "database_result": applied.data}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("PayPal order capture/application failed.")
+        raise HTTPException(status_code=503, detail="PayPal capture could not be applied safely. Retry after checking logs.")
+
+@app.get("/api/v1/jobs")
+async def list_customer_jobs(request: Request):
+    user = await get_authenticated_user(request)
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database is not connected.")
+    rows = supabase.table("automation_jobs").select("id,job_type,input_filename,status,created_at,completed_at").eq("profile_id", user["user_id"]).order("created_at", desc=True).limit(25).execute()
+    return {"jobs": rows.data or []}
+
+@app.get("/api/v1/jobs/{job_id}")
+async def get_customer_job(job_id: str, request: Request):
+    user = await get_authenticated_user(request)
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database is not connected.")
+    try:
+        job_uuid = str(UUID(job_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid report ID.")
+    rows = supabase.table("automation_jobs").select("*").eq("id", job_uuid).eq("profile_id", user["user_id"]).limit(1).execute()
+    if not rows.data:
+        raise HTTPException(status_code=404, detail="Report not found.")
+    return {"job": rows.data[0]}
+
+if __name__ == "__main__":
+    import uvicorn
+    # Start server locally on port 3000 mapping DevSecOps requirements
+    uvicorn.run(app, host="0.0.0.0", port=3000)
++data.amount+' USD. Opening PayPal Sandbox; use a Sandbox buyer test account to approve it.','good');window.location.assign(approval.href)}
 async function captureReturned(){const orderId=new URLSearchParams(window.location.search).get('token');if(!orderId)throw new Error('No PayPal order token was found. Start checkout and return here after approving the Sandbox payment.');const data=await api('/api/v1/payments/paypal/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:orderId})});window.history.replaceState({},'',window.location.pathname);notice(accountNotice,data.message||'Payment verification completed.','good');await loadAccount();await loadReports()}
 async function handleAuthCallback(){const hash=new URLSearchParams(window.location.hash.replace(/^#/,''));const query=new URLSearchParams(window.location.search);const accessToken=hash.get('access_token')||query.get('access_token');const authError=hash.get('error_description')||query.get('error_description')||hash.get('error')||query.get('error');if(authError)throw new Error('Email confirmation did not complete: '+authError.replace(/\+/g,' '));if(accessToken){const data=await api('/api/v1/auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:accessToken})});window.history.replaceState({},'',window.location.pathname);notice(accountNotice,data.message||'Email confirmed. You are signed in.','good');await loadAccount();await loadReports();return true}if(query.get('auth')==='confirmed'){notice(accountNotice,'Email confirmed. Sign in below to continue.','good');window.history.replaceState({},'',window.location.pathname);return true}return false}
 async function submitJob(){const file=$('csv').files&&$('csv').files[0];if(!file)throw new Error('Choose a CSV file before submitting the job.');if(!file.name.toLowerCase().endsWith('.csv'))throw new Error('Please choose a file ending in .csv.');const form=new FormData();form.append('file',file);const data=await api('/api/v1/automation/clean-csv',{method:'POST',body:form});notice(jobNotice,'Job completed. '+data.rows_cleaned+' data rows processed.','good');showResult('Latest cleaned CSV',data.formatted_result||JSON.stringify(data,null,2));await loadReports()}
