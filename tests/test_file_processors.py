@@ -22,6 +22,15 @@ class MultiFormatProcessorTests(unittest.TestCase):
         self.assertEqual(parsed["error_detail"], "failure happened")
         self.assertEqual(result["summary"]["anomaly_fields_detected"], 1)
 
+    def test_scale_json_anomaly_filter_keeps_only_error_records(self):
+        payload = b'[{"event":"ok"},{"event":"failed","error":"timeout"},{"event":"crash","exception":"ValueError"}]'
+        result = fp.process_data_file("events.json", payload, "tier_2_83", "json_filter_anomalies")
+        rows = json.loads(result["formatted_result"])
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(result["summary"]["entries_received"], 3)
+        self.assertEqual(result["summary"]["entries_filtered_out"], 1)
+        self.assertEqual(result["job_type"], "json_anomaly_filter")
+
     def test_basic_cannot_use_scale_json_processor(self):
         with self.assertRaisesRegex(ValueError, "Scale tier"):
             fp.process_data_file("payload.json", b'{"x":1}', "tier_1_51")
