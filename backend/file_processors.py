@@ -359,6 +359,16 @@ def _parse_log(content: bytes, tier: str) -> dict[str, Any]:
     pattern = re.compile(r"^\s*(?:(?P<timestamp>\d{4}-\d{2}-\d{2}[T ][0-9:.+\-Z]+)\s+)?(?:\[(?P<bracketlevel>TRACE|DEBUG|INFO|WARN|WARNING|ERROR|CRITICAL|FATAL)\]|(?P<level>TRACE|DEBUG|INFO|WARN|WARNING|ERROR|CRITICAL|FATAL))\s*[:\-]?\s*(?P<message>.*)$", re.I)
     entries: list[dict[str, Any]] = []
     for line_number, line in enumerate(raw_lines, start=1):
+        stripped = line.lstrip()
+        is_stack_line = (
+            stripped.startswith(("at ", "File ", "Traceback", "Caused by:", "..."))
+            or bool(re.search(r"\b[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)\b|\bException\b|\bError\b", line))
+        )
+        # Recognize stack lines before the general level regex: "Traceback" begins
+        # with "Trace", which otherwise looks like the TRACE log level.
+        if line[:1].isspace() and entries and is_stack_line:
+            entries[-1]["stack_trace"] = (entries[-1]["stack_trace"] + "\n" + line.rstrip()).strip()
+            continue
         match = pattern.match(line)
         if match:
             level = (match.group("bracketlevel") or match.group("level") or "INFO").upper()
