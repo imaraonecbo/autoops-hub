@@ -11,7 +11,7 @@ import hmac
 import hashlib
 import json
 from typing import Dict, Any, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Form, Request, status
 from backend import file_processors
 from fastapi.responses import HTMLResponse, Response
@@ -94,6 +94,21 @@ def _assert_paypal_runtime_ready() -> None:
         raise HTTPException(status_code=503, detail="PayPal credentials are not fully configured for this environment.")
     if mode == "live" and not PAYPAL_LIVE_ENABLED:
         raise HTTPException(status_code=503, detail="Live checkout is deliberately disabled until production credentials and merchant configuration are verified.")
+
+
+def _public_app_url() -> str:
+    """Require an explicit HTTPS return URL; never fall back from production to staging."""
+    raw = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+    if not raw:
+        raise HTTPException(status_code=503, detail="Public application URL is not configured for this environment.")
+    parsed = urlsplit(raw)
+    if (parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password
+            or parsed.path or parsed.query or parsed.fragment):
+        raise HTTPException(status_code=503, detail="Public application URL must be a plain HTTPS origin.")
+    if _paypal_mode() == "live" and (parsed.hostname or "").lower() == "autoops-hub-staging.onrender.com":
+        raise HTTPException(status_code=503, detail="Live PayPal checkout cannot return to the staging application.")
+    return raw
+
 
 supabase: Optional[Client] = None
 if SUPABASE_URL and SUPABASE_KEY and "placeholder" not in SUPABASE_URL.lower() and "placeholder" not in SUPABASE_KEY.lower() and "unconfigured" not in SUPABASE_KEY.lower():
@@ -497,7 +512,7 @@ async def paypal_webhook(request: Request):
         if tier not in TIERS or float(TIERS[tier][0]) != amount_val:
             raise HTTPException(status_code=400, detail="Recorded checkout tier and capture amount do not match.")
         custom_id = resource.get("custom_id")
-        if custom_id and custom_id != saved.get("user_id"):
+        if custom_id != saved.get("user_id"):
             raise HTTPException(status_code=400, detail="Capture customer metadata does not match the server-recorded checkout.")
         if saved.get("status") == "captured":
             if saved.get("capture_id") != capture_id:
@@ -755,7 +770,7 @@ async def customer_portal():
 <div class="side-foot">AUTOMATION WORKSPACE<br>Secure account · Private reports</div>
 </aside>
 <main class="main">
-<header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="menuBtn" aria-label="Open navigation">☰</button><div class="breadcrumbs">AutoOps Hub <span style="color:#506680">/</span> <strong id="crumbTitle">Overview</strong></div></div><div class="top-actions"><span class="env-pill"><span class="dot"></span>Sandbox</span><div class="user-chip"><div class="avatar" id="topAvatar">A</div><div class="user-detail"><strong id="topUserName">Guest workspace</strong><small id="topUserMeta">Sign in to sync reports</small></div></div></div></header>
+<header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="menuBtn" aria-label="Open navigation">☰</button><div class="breadcrumbs">AutoOps Hub <span style="color:#506680">/</span> <strong id="crumbTitle">Overview</strong></div></div><div class="top-actions"><span class="env-pill" id="topEnvPill"><span class="dot"></span>Payment configuration</span><div class="user-chip"><div class="avatar" id="topAvatar">A</div><div class="user-detail"><strong id="topUserName">Guest workspace</strong><small id="topUserMeta">Sign in to sync reports</small></div></div></div></header>
 <section class="view active" id="view-overview" data-page="overview">
 <div class="page-head"><div><div class="eyebrow">Workspace overview</div><h1>Good work starts with clean data.</h1><p>Run repeatable CSV cleanup jobs, inspect data-quality results, and keep every report linked to your account. Your workspace gives you one place to process, review, and retrieve the outputs.</p></div><button class="btn" id="overviewStartJob">＋ Create a cleanup job</button></div>
 <div class="hero"><div class="hero-copy"><div class="eyebrow">DATA OPERATIONS · MADE PRACTICAL</div><h2>From raw spreadsheets to <span>decision-ready files.</span></h2><p>Standardize headers, normalize cell whitespace, remove blank or duplicate rows on eligible tiers, and produce a saved output with a transparent quality summary. No inflated promises — just a clear workflow and a report you can retrieve.</p><div class="hero-actions"><button class="btn" id="heroJobBtn">Start a CSV job <span>→</span></button><button class="btn secondary" id="heroPlansBtn">Compare plans</button></div></div>
@@ -764,7 +779,7 @@ async def customer_portal():
 <article class="metric"><div class="metric-label">Saved jobs</div><div class="metric-row"><div><div class="metric-value" id="metricJobs">—</div><div class="metric-note">Jobs in your report history</div></div><div class="metric-symbol">▤</div></div></article>
 <article class="metric"><div class="metric-label">Current access</div><div class="metric-row"><div><div class="metric-value" id="metricTier" style="font-size:20px">Guest</div><div class="metric-note" id="metricTierNote">Sign in to view your tier</div></div><div class="metric-symbol">◇</div></div></article>
 <article class="metric"><div class="metric-label">Latest report</div><div class="metric-row"><div><div class="metric-value" id="metricLatest" style="font-size:16px">—</div><div class="metric-note" id="metricLatestNote">No job completed yet</div></div><div class="metric-symbol">↗</div></div></article>
-<article class="metric"><div class="metric-label">Payment mode</div><div class="metric-row"><div><div class="metric-value" style="font-size:20px">Sandbox</div><div class="metric-note">No live payments enabled</div></div><div class="metric-symbol">◎</div></div></article>
+<article class="metric"><div class="metric-label">Payment mode</div><div class="metric-row"><div><div class="metric-value" id="paymentModeMetric" style="font-size:20px">Checking</div><div class="metric-note" id="paymentModeMetricNote">Verifying server configuration</div></div><div class="metric-symbol">◎</div></div></article>
 </div>
 <div class="section-title"><div><h2>Capabilities in this workspace</h2><p>Features customers can use in the current CSV cleanup service.</p></div><button class="btn ghost small" data-go="billing">View plan limits</button></div>
 <div class="grid service-grid">
@@ -782,15 +797,15 @@ async def customer_portal():
 <section class="card"><div class="section-title" style="margin:0 0 13px"><div><h3>Report history</h3><p>Only reports belonging to your account are shown.</p></div><button class="btn secondary small" id="refreshBtn">↻ Refresh</button></div><div id="reportList" class="report-empty">Sign in to load your private report history.</div><div id="reportResult"></div></section></div>
 </section>
 <section class="view" id="view-billing" data-page="billing">
-<div class="page-head"><div><div class="eyebrow">Access &amp; billing</div><h1>Plans built around real work.</h1><p>Every plan includes the core CSV cleanup workflow. Higher tiers increase the permitted file size and add distinct cleanup and data-quality capabilities.</p></div><span class="env-pill"><span class="dot"></span>Sandbox checkout</span></div>
-<div class="plan-note"><strong>Testing notice:</strong> These are the requested Sandbox one-time prices and job-credit packages, not recurring subscriptions. Sandbox transactions do not pay out real funds. Live billing remains disabled until production credentials and merchant ownership are verified.</div>
+<div class="page-head"><div><div class="eyebrow">Access &amp; billing</div><h1>Plans built around real work.</h1><p>Every plan includes the core CSV cleanup workflow. Higher tiers increase the permitted file size and add distinct cleanup and data-quality capabilities.</p></div><span class="env-pill" id="billingEnvPill"><span class="dot"></span>PayPal checkout</span></div>
+<div class="plan-note"><strong>One-time payment notice:</strong> Each plan is a single purchase, not a recurring subscription. Job credits are granted only after the server verifies a completed PayPal capture and records the transaction against the signed-in customer.</div>
 <div class="grid pricing">
-<article class="price-card" data-price-tier="tier_1_51"><div class="plan-label">BASIC · ESSENTIAL CLEANUP</div><div class="price">$79</div><div class="once">USD · one-time Sandbox test purchase</div><p class="feature-note">For dependable, everyday CSV preparation.</p><ul><li>Standardize CSV headers and trim cell whitespace</li><li>Up to 2,500 data rows per file</li><li>30 jobs included per purchase</li><li>Private saved reports and cleaned CSV output</li><li>Historical report retrieval</li></ul><button class="btn plan-select" data-tier="tier_1_51">Select Basic</button></article>
+<article class="price-card" data-price-tier="tier_1_51"><div class="plan-label">BASIC · ESSENTIAL CLEANUP</div><div class="price">$79</div><div class="once">USD · one-time payment</div><p class="feature-note">For dependable, everyday CSV preparation.</p><ul><li>Standardize CSV headers and trim cell whitespace</li><li>Up to 2,500 data rows per file</li><li>30 jobs included per purchase</li><li>Private saved reports and cleaned CSV output</li><li>Historical report retrieval</li></ul><button class="btn plan-select" data-tier="tier_1_51">Select Basic</button></article>
 <article class="price-card featured" data-price-tier="tier_2_83"><div class="plan-label">SCALE · TECHNICAL OPERATIONS</div><div class="price">$149</div><div class="once">USD · one-time Sandbox test purchase</div><p class="feature-note">For teams working with spreadsheets, JSON payloads and operational logs.</p><ul><li><b>Everything in Basic, plus:</b></li><li>Multi-sheet Excel (.xlsx) cleaning and consolidation</li><li>JSON payload formatting and error-field scan</li><li>Filter JSON event arrays to error/exception records</li><li>Server log parsing and structured stack-trace summaries</li><li>Blank-row removal, exact deduplication and missing-value counts</li><li>Up to 25,000 rows or entries per file</li><li>300 jobs included per purchase</li></ul><button class="btn plan-select" data-tier="tier_2_83">Select Scale</button></article>
 <article class="price-card" data-price-tier="tier_3_129"><div class="plan-label">ULTIMATE · MERCHANT &amp; ENTERPRISE</div><div class="price">$299</div><div class="once">USD · one-time Sandbox test purchase</div><p class="feature-note">For high-volume catalogs, order exports, and data-quality review.</p><ul><li><b>Everything in Scale, plus:</b></li><li>Catalog SKU, price and inventory standardization for sync-ready exports (external store writes are not enabled)</li><li>Order price, currency, address and phone normalization</li><li>User export email validation and duplicate identity resolution</li><li>Deep type inference, anomaly detection and quality flags</li><li>Enterprise API route and retrievable historical reports</li><li>Up to 250,000 rows or entries per file</li><li>1,500 jobs included per purchase</li></ul><button class="btn plan-select" data-tier="tier_3_129">Select Ultimate</button></article>
 </div>
-<div class="workspace" style="margin-top:16px"><section class="card"><h3>Complete Sandbox checkout</h3><p class="sub">Sign in to AutoOps Hub first. You will then be redirected to PayPal Sandbox to approve the selected test order.</p><div class="field"><label for="tier">SELECT PLAN</label><select id="tier"><option value="tier_1_51">Basic — $79 USD</option><option value="tier_2_83">Scale — $149 USD</option><option value="tier_3_129">Ultimate — $299 USD</option></select></div><button class="btn block" id="checkoutBtn">Continue to PayPal Sandbox →</button><div class="notice" id="billingNotice" role="status" aria-live="polite"></div></section>
-<section class="card"><h3>Billing clarity</h3><p class="sub">The current integration creates a one-time Sandbox order. Automatic renewals, invoices, refunds, tax calculation, and a customer-facing payment management portal are not represented as available features yet.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Order is created by the server and associated with the signed-in account.</span></div><div class="security-item"><span class="security-check">✓</span><span>Capture amount and plan are checked before a tier upgrade is applied.</span></div><div class="security-item"><span class="security-check">!</span><span>Live processing remains disabled until a complete end-to-end test and merchant verification.</span></div></div></section></div>
+<div class="workspace" style="margin-top:16px"><section class="card"><h3>Complete PayPal checkout</h3><p class="sub">Sign in to AutoOps Hub first. You will be redirected to PayPal to approve the one-time order in the environment shown above.</p><div class="field"><label for="tier">SELECT PLAN</label><select id="tier"><option value="tier_1_51">Basic — $79 USD</option><option value="tier_2_83">Scale — $149 USD</option><option value="tier_3_129">Ultimate — $299 USD</option></select></div><button class="btn block" id="checkoutBtn">Continue to PayPal Sandbox →</button><div class="notice" id="billingNotice" role="status" aria-live="polite"></div></section>
+<section class="card"><h3>Billing clarity</h3><p class="sub">The current integration creates a one-time PayPal order. Automatic renewals, invoices, refunds, tax calculation, and a customer-facing payment management portal are not represented as available features yet.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Order is created by the server and associated with the signed-in account.</span></div><div class="security-item"><span class="security-check">✓</span><span>Capture amount and plan are checked before a tier upgrade is applied.</span></div><div class="security-item"><span class="security-check">!</span><span>Live processing remains disabled until a complete end-to-end test and merchant verification.</span></div></div></section></div>
 </section>
 <section class="view" id="view-settings" data-page="settings">
 <div class="page-head"><div><div class="eyebrow">Workspace control</div><h1>Settings</h1><p>Manage your current session and workspace preferences. Payment credentials are intentionally kept on the server rather than exposed in browser settings.</p></div><span class="tag">Account preferences</span></div>
@@ -803,11 +818,11 @@ async def customer_portal():
 <div class="setting-row"><div><strong>Compact workspace</strong><p>Reduce card spacing so more information fits on screen.</p></div><label class="switch"><input id="compactMode" type="checkbox"><span class="switch-track"></span></label></div>
 <div class="setting-row"><div><strong>Show completed job details first</strong><p>Open the latest saved report automatically when loading history.</p></div><label class="switch"><input id="autoOpenLatest" type="checkbox"><span class="switch-track"></span></label></div>
 <div class="notice show" id="preferenceNotice">Changes apply immediately and stay in this browser.</div></section>
-<section class="card"><h3>Payment environment</h3><p class="sub">This customer workspace is connected to PayPal Sandbox. The dashboard must never store client secrets or merchant credentials in browser-accessible settings.</p><div class="setting-row"><div><strong>Active checkout mode</strong><p>PayPal Sandbox · one-time test orders only</p></div><span class="tag">Sandbox</span></div><div class="setting-row"><div><strong>Merchant receiving account</strong><p>Determined by the PayPal REST app and merchant configuration used by the server. Not verified as live.</p></div><span class="tag">Not verified</span></div><a href="https://dashboard.render.com/web/srv-db7kcpuk1f9s7382q7q0" class="btn secondary block" target="_blank" rel="noopener">Open server configuration in Render ↗</a></section>
+<section class="card"><h3>Payment environment</h3><p class="sub">PayPal credentials are stored server-side only. Never place a client secret or merchant credential in browser-accessible settings.</p><div class="setting-row"><div><strong>Active checkout mode</strong><p id="activeCheckoutMode">Checking the configured PayPal environment…</p></div><span class="tag" id="activeCheckoutTag">Checking</span></div><div class="setting-row"><div><strong>Merchant receiving account</strong><p>Determined by the PayPal REST app and merchant configuration used by the server. Not verified as live.</p></div><span class="tag">Not verified</span></div><a href="https://dashboard.render.com/web/srv-db7kcpuk1f9s7382q7q0" class="btn secondary block" target="_blank" rel="noopener">Open server configuration in Render ↗</a></section>
 <section class="card"><h3>Security &amp; privacy</h3><p class="sub">Controls that protect customer accounts and report history.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Account endpoints verify the Supabase session token server-side.</span></div><div class="security-item"><span class="security-check">✓</span><span>Report queries are scoped to the signed-in user's account.</span></div><div class="security-item"><span class="security-check">✓</span><span>PayPal client secrets belong in Render environment variables, never HTML, JavaScript, or public repository files.</span></div></div></section>
 </div>
 </section>
-<footer class="footer"><span>AutoOps Hub · Operations workspace</span><span>Sandbox mode · No real payments are processed in this environment.</span></footer>
+<footer class="footer"><span>AutoOps Hub · Operations workspace</span><span>One-time checkout only · payment capture is verified server-side before account credits are granted.</span></footer>
 </main>
 </div>
 <script>
@@ -818,18 +833,36 @@ const accountNotice=$('accountNotice'),jobNotice=$('jobNotice'),reportList=$('re
 const authControls=$('authControls'),signedInPanel=$('signedInPanel'),signedInLabel=$('signedInLabel');
 let currentUser=null,currentProfile=null,reportsCache=[],paymentMode='sandbox',paymentsEnabled=false;
 async function configurePaymentMode(){
-  const pill=document.querySelector('.env-pill');
   try{
     const health=await api('/api/v1/health');
     paymentMode=health.payment_mode||'sandbox';
     paymentsEnabled=health.paypal_checkout_enabled===true;
-    if(pill)pill.innerHTML='<span class="dot"></span>'+(paymentMode==='live'?'Live payments':paymentMode==='sandbox'?'Sandbox':'Payment configuration invalid');
+    const environmentLabel=paymentMode==='live'?'Live':paymentMode==='sandbox'?'Sandbox':'Invalid';
+    const topPill=$('topEnvPill');
+    if(topPill)topPill.innerHTML='<span class="dot"></span>'+(paymentsEnabled?environmentLabel+' payments':environmentLabel+' setup incomplete');
+    const sideTitle=$('sideEnvTitle');
+    if(sideTitle)sideTitle.textContent=paymentsEnabled?environmentLabel+' payment environment':environmentLabel+' checkout not enabled';
+    const sideCopy=$('sideEnvCopy');
+    if(sideCopy)sideCopy.textContent=paymentsEnabled?'One-time PayPal checkout is enabled. Captures are verified server-side before credits are granted.':'Checkout stays disabled until PayPal and database configuration are verified.';
+    const metric=$('paymentModeMetric');
+    if(metric)metric.textContent=environmentLabel;
+    const metricNote=$('paymentModeMetricNote');
+    if(metricNote)metricNote.textContent=paymentsEnabled?'One-time checkout enabled':'Checkout disabled pending verification';
+    const billingPill=$('billingEnvPill');
+    if(billingPill)billingPill.innerHTML='<span class="dot"></span>'+environmentLabel+' checkout';
+    const activeMode=$('activeCheckoutMode');
+    if(activeMode)activeMode.textContent='PayPal '+environmentLabel+' · one-time purchases'+(paymentsEnabled?' enabled':' disabled pending verification');
+    const activeTag=$('activeCheckoutTag');
+    if(activeTag)activeTag.textContent=paymentsEnabled?'Enabled':'Disabled';
     const button=$('checkoutBtn');
     if(button&&!paymentsEnabled){button.title='Checkout is disabled until PayPal and database configuration are verified.';button.setAttribute('aria-disabled','true')}
     if(button&&paymentsEnabled){button.removeAttribute('aria-disabled');button.title='Continue to '+(paymentMode==='live'?'PayPal':'PayPal Sandbox')}
   }catch(e){
     paymentsEnabled=false;
+    const pill=$('topEnvPill');
     if(pill)pill.innerHTML='<span class="dot"></span>Payment status unavailable';
+    const sideCopy=$('sideEnvCopy');
+    if(sideCopy)sideCopy.textContent='Checkout availability could not be verified.';
   }
 }
 function notice(el,message,type){if(!el)return;el.textContent=message;el.className='notice show'+(type?' '+type:'')}
@@ -849,7 +882,7 @@ async function loadAccount(silent){try{const data=await api('/api/v1/auth/me');s
 async function authenticate(mode){const body=credentials();const data=await api('/api/v1/auth/'+mode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(data.user){setNavView('overview');await loadAccount(true);await loadReports();notice(accountNotice,data.message||'Signed in successfully.','good')}else{notice(settingsAccountNotice,data.message||'Account created. Check your email to confirm it.','good')}}
 async function logout(){await api('/api/v1/auth/logout',{method:'POST'});setSignedOutUI();reportsCache=[];reportList.className='report-empty';reportList.textContent='Sign in to load your private report history.';reportResult.replaceChildren();notice(settingsAccountNotice,'You have signed out. Sign in again to access your private reports or checkout.','good')}
 async function checkout(){await configurePaymentMode();if(!paymentsEnabled)throw new Error('Checkout is disabled because payment or database readiness has not been verified. Please try again after the service is configured.');const signedIn=await loadAccount(true);if(!signedIn){setNavView('settings');throw new Error('Please sign in to AutoOps Hub first. The order will be linked to the account that is signed in.')}const data=await api('/api/v1/payments/paypal/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:$('tier').value})});if(!data.approval_url)throw new Error('PayPal did not return an approval link. Check the configured credentials and try again.');let approval;try{approval=new URL(data.approval_url)}catch(e){throw new Error('PayPal returned an invalid approval URL. No redirect was attempted.')}const allowedHosts=paymentMode==='live'?['www.paypal.com','paypal.com']:['www.sandbox.paypal.com','sandbox.paypal.com'];if(approval.protocol!=='https:'||!allowedHosts.includes(approval.hostname))throw new Error('PayPal returned an approval URL for the wrong payment environment. No redirect was attempted.');notice(billingNotice,(paymentMode==='live'?'Live':'Sandbox')+' order created for 
-async function captureReturned(){const orderId=new URLSearchParams(window.location.search).get('token');if(!orderId)throw new Error('No PayPal order token was found. Start checkout and return here after approving the Sandbox payment.');const data=await api('/api/v1/payments/paypal/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:orderId})});window.history.replaceState({},'',window.location.pathname+'#billing');notice(billingNotice,data.message||'Payment verification completed.','good');await loadAccount(true);await loadReports()}
+async function captureReturned(){const orderId=new URLSearchParams(window.location.search).get('token');if(!orderId)throw new Error('No PayPal order token was found. Start checkout and return here after approving the PayPal order.');const data=await api('/api/v1/payments/paypal/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:orderId})});window.history.replaceState({},'',window.location.pathname+'#billing');notice(billingNotice,data.message||'Payment verification completed.','good');await loadAccount(true);await loadReports()}
 async function handleAuthCallback(){const hash=new URLSearchParams(window.location.hash.replace(/^#/,''));const query=new URLSearchParams(window.location.search);const accessToken=hash.get('access_token')||query.get('access_token');const authError=hash.get('error_description')||query.get('error_description')||hash.get('error')||query.get('error');if(authError)throw new Error('Email confirmation did not complete: '+authError.replace(/\+/g,' '));if(accessToken){const data=await api('/api/v1/auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:accessToken})});window.history.replaceState({},'',window.location.pathname+'#overview');notice(accountNotice,data.message||'Email confirmed. You are signed in.','good');await loadAccount(true);await loadReports();return true}if(query.get('auth')==='confirmed'){setNavView('settings');notice(settingsAccountNotice,'Email confirmation completed. Sign in below to continue.','good');window.history.replaceState({},'',window.location.pathname+'#settings');return true}return false}
 function downloadReport(name,value,format){const ext=(format||'csv').toLowerCase()==='json'?'json':'csv';const blob=new Blob([value],{type:ext==='json'?'application/json;charset=utf-8':'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(name||'autoops-report').replace(/[^a-z0-9_.-]/gi,'_')+'.'+ext;document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}
 function showResult(title,value){reportResult.replaceChildren();const heading=document.createElement('h3');heading.textContent=title;heading.style.margin='16px 0 7px';reportResult.append(heading);let printable=value,download=null,format='csv';if(value&&typeof value==='object'){format=value.output_format||'csv';if(value.formatted_result){download=value.formatted_result;printable=JSON.stringify(value.summary||{rows_cleaned:value.rows_cleaned},null,2)+'\n\n'+value.formatted_result}else printable=JSON.stringify(value,null,2)}const pre=document.createElement('pre');pre.className='result-box';pre.textContent=typeof printable==='string'?printable:JSON.stringify(printable,null,2);reportResult.append(pre);if(download!==null){const button=document.createElement('button');button.className='btn secondary small';button.textContent='Download '+(format==='json'?'JSON result':'cleaned CSV');button.style.marginTop='10px';button.addEventListener('click',()=>downloadReport(title,download,format));reportResult.append(button)}}
@@ -965,7 +998,7 @@ async def create_paypal_order(request: Request, payload: Dict[str, Any]):
         raise HTTPException(status_code=409, detail="Account profile/usage ledger is missing; cannot create a checkout.")
     amount, label = TIERS[tier]
     token = await _paypal_access_token()
-    base_url = os.getenv("PUBLIC_APP_URL", "https://autoops-hub-staging.onrender.com").rstrip("/")
+    base_url = _public_app_url()
     payload = {
         "intent": "CAPTURE",
         "purchase_units": [{
@@ -1024,8 +1057,9 @@ async def capture_paypal_order(request: Request, payload: Dict[str, Any]):
                 headers={"Authorization": f"Bearer {token}"})
             check.raise_for_status()
             order = check.json()
-            if order.get("status") != "APPROVED":
-                raise HTTPException(status_code=409, detail="PayPal order is not approved yet.")
+            order_status = order.get("status")
+            if order_status not in {"APPROVED", "COMPLETED"}:
+                raise HTTPException(status_code=409, detail="PayPal order is not approved or already completed.")
             units = order.get("purchase_units") or []
             if len(units) != 1:
                 raise HTTPException(status_code=400, detail="Unexpected PayPal purchase-unit count.")
@@ -1033,12 +1067,20 @@ async def capture_paypal_order(request: Request, payload: Dict[str, Any]):
             amt = unit.get("amount") or {}
             if unit.get("custom_id") != user["user_id"] or unit.get("reference_id") != saved["tier"]:
                 raise HTTPException(status_code=400, detail="PayPal order ownership/tier mismatch.")
+            if saved.get("tier") not in TIERS or float(saved.get("amount", 0)) != float(TIERS[saved["tier"]][0]):
+                raise HTTPException(status_code=409, detail="Server-recorded checkout tier and amount do not match.")
             if amt.get("currency_code") != "USD" or amt.get("value") != f'{float(saved["amount"]):.2f}':
                 raise HTTPException(status_code=400, detail="PayPal order amount does not match the recorded plan.")
-            captured = await client.post(f"{PAYPAL_API_BASE}/v2/checkout/orders/{order_id}/capture",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json={})
-            captured.raise_for_status()
-            capture_data = captured.json()
+            if order_status == "APPROVED":
+                request_id = "ao-cap-" + hashlib.sha256(order_id.encode("utf-8")).hexdigest()[:24]
+                captured = await client.post(f"{PAYPAL_API_BASE}/v2/checkout/orders/{order_id}/capture",
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                             "PayPal-Request-Id": request_id}, json={})
+                captured.raise_for_status()
+                capture_data = captured.json()
+            else:
+                # Recover a previously completed PayPal capture if the first HTTP response was lost.
+                capture_data = order
         if capture_data.get("status") != "COMPLETED":
             raise HTTPException(status_code=409, detail="PayPal has not completed the capture.")
         captures = (((capture_data.get("purchase_units") or [{}])[0].get("payments") or {}).get("captures") or [])
@@ -1055,12 +1097,26 @@ async def capture_paypal_order(request: Request, payload: Dict[str, Any]):
         supabase.table("paypal_orders").update({
             "status": "captured", "capture_id": cap["id"], "captured_at": datetime.now(timezone.utc).isoformat()
         }).eq("paypal_order_id", order_id).execute()
-        return {"success": True, "message": "Sandbox payment captured and account tier updated.", "tier": saved["tier"], "capture_id": cap["id"], "database_result": applied.data}
+        return {"success": True, "message": f"{_paypal_mode().title()} payment captured and account tier updated.", "tier": saved["tier"], "capture_id": cap["id"], "transaction_id": cap["id"], "database_result": applied.data}
     except HTTPException:
         raise
     except Exception:
         logger.exception("PayPal order capture/application failed.")
         raise HTTPException(status_code=503, detail="PayPal capture could not be applied safely. Retry after checking logs.")
+
+@app.get("/api/v1/payments/history")
+async def list_customer_payment_history(request: Request):
+    """Return only the authenticated customer's verified one-time payment records."""
+    user = await get_authenticated_user(request)
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database is not connected.")
+    rows = supabase.table("transactions").select(
+        "transaction_id,payment_gateway,gateway_transaction_id,amount_paid,timestamp"
+    ).eq("profile_id", user["user_id"]).eq("payment_gateway", "paypal").order(
+        "timestamp", desc=True
+    ).limit(25).execute()
+    return {"transactions": rows.data or []}
+
 
 @app.get("/api/v1/jobs")
 async def list_customer_jobs(request: Request):
