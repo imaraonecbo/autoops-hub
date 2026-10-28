@@ -29,8 +29,8 @@ class TieredCsvTests(unittest.TestCase):
         self.assertTrue(any("note" in flag for flag in summary["quality_flags"]))
 
     def test_row_limit_is_enforced_per_tier(self):
-        rows = "name\n" + "".join(f"person{i}\n" for i in range(1001))
-        with self.assertRaisesRegex(ValueError, "up to 1,000"):
+        rows = "name\n" + "".join(f"person{i}\n" for i in range(2501))
+        with self.assertRaisesRegex(ValueError, "up to 2,500"):
             app_module.clean_csv_content(rows, "tier_1_51")
 
     def test_empty_csv_is_rejected(self):
