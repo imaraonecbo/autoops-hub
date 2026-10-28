@@ -365,7 +365,7 @@ def _parse_log(content: bytes, tier: str) -> dict[str, Any]:
             if level == "WARNING":
                 level = "WARN"
             entries.append({"line": line_number, "timestamp": match.group("timestamp"), "level": level, "message": match.group("message").strip(), "stack_trace": ""})
-        elif line[:1].isspace() and entries and (line.lstrip().startswith(("at ", "File ", "Traceback", "Caused by:", "...")) or re.search(r"\bException\b|\bError\b", line)):
+        elif line[:1].isspace() and entries and (line.lstrip().startswith(("at ", "File ", "Traceback", "Caused by:", "...")) or re.search(r"\b[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)\b|\bException\b|\bError\b", line)):
             entries[-1]["stack_trace"] = (entries[-1]["stack_trace"] + "\n" + line.rstrip()).strip()
         else:
             entries.append({"line": line_number, "timestamp": None, "level": "INFO", "message": line.strip(), "stack_trace": ""})
