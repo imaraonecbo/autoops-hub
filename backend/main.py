@@ -1121,7 +1121,7 @@ function renderTextPreview(target,text,kind,format){
   target.replaceChildren();let content=String(text||'');
   if(format==='json'){try{content=JSON.stringify(JSON.parse(content),null,2)}catch(e){}}
   const pre=document.createElement('pre');pre.className='diff-pre';
-  content.slice(0,16000).split(String.fromCharCode(10)).slice(0,28).forEach(line=>{const span=document.createElement('span');if(kind==='raw'(/[\t ]+$/.test(line)))span.className='diff-line-bad';else if(kind==='clean')span.className='diff-line-good';span.textContent=line;pre.append(span,document.createTextNode(String.fromCharCode(10)))});target.append(pre);
+  content.slice(0,16000).split(String.fromCharCode(10)).slice(0,28).forEach(line=>{const span=document.createElement('span');if(kind==='raw'&&(/[\t ]+$/.test(line)))span.className='diff-line-bad';else if(kind==='clean')span.className='diff-line-good';span.textContent=line;pre.append(span,document.createTextNode(String.fromCharCode(10)))});target.append(pre);
   if(content.length>16000){const note=document.createElement('div');note.className='support-meta';note.textContent='Preview shortened to protect browser responsiveness; the full server result is retained.';target.append(note)}
 }
 async function renderDiffInspector(file,result){
