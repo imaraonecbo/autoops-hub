@@ -1,0 +1,63 @@
+name: Customer journey and payment safety tests
+on:
+  push:
+    branches:
+      - production-paypal-live-20261028
+    paths:
+      - "backend/**"
+      - "tests/**"
+      - "supabase/migrations/**"
+      - ".github/workflows/customer-journey-tests.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "tests/**"
+      - "supabase/migrations/**"
+      - ".github/workflows/customer-journey-tests.yml"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Run unit and payment security tests
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+          PAYPAL_CLIENT_ID: ""
+          PAYPAL_CLIENT_SECRET: ""
+          PAYPAL_WEBHOOK_ID: ""
+        run: python -m unittest discover -s tests -v
+      - name: Smoke-test live production without creating an order
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoops-hub-production.onrender.com"
+          curl --fail --silent --show-error "$base/api/v1/health" -o health.json
+          curl --fail --silent --show-error "$base/api/v1/payments/paypal/public-config" -o paypal-config.json
+          auth_status=$(curl --silent --output /dev/null --write-out "%{http_code}" "$base/api/v1/auth/me")
+          order_status=$(curl --silent --output /dev/null --write-out "%{http_code}" -X POST "$base/api/v1/payments/paypal/order" -H "Content-Type: application/json" --data '{"tier":"tier_1_51"}')
+          python - <<'PY'
+          import json
+          with open("health.json", encoding="utf-8") as f:
+              health = json.load(f)
+          with open("paypal-config.json", encoding="utf-8") as f:
+              paypal = json.load(f)
+          print("Production health:", json.dumps(health, sort_keys=True))
+          print("Public PayPal config:", json.dumps({k: v for k, v in paypal.items() if k != "client_id"}, sort_keys=True))
+          if health.get("status") != "ok":
+              raise SystemExit("Production health is not ok.")
+          if health.get("database_configured") is not True or health.get("database_reachable") is not True:
+              raise SystemExit("Production database readiness check failed.")
+          if health.get("paypal_checkout_enabled") is not True or paypal.get("enabled") is not True:
+              raise SystemExit("Production PayPal checkout is not enabled.")
+          PY
+          test "$auth_status" = "401" || { echo "Unauthenticated /auth/me returned $auth_status (expected 401)"; exit 1; }
+          test "$order_status" = "401" || { echo "Unauthenticated order creation returned $order_status (expected 401; no order should be created)"; exit 1; }
+          echo "Live smoke checks passed; no PayPal order or charge was created."

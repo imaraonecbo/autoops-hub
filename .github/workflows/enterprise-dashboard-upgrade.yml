@@ -1,0 +1,105 @@
+name: Enterprise dashboard upgrade checks
+
+on:
+  push:
+    branches:
+      - enterprise-dashboard-upgrade-20261029
+  pull_request:
+    branches:
+      - production-paypal-live-20261028
+
+permissions:
+  contents: read
+
+jobs:
+  ui-and-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install existing backend test dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Extract embedded dashboard JavaScript and check syntax
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          source = Path("backend/main.py").read_text(encoding="utf-8")
+          tree = ast.parse(source)
+          html = None
+          for node in ast.walk(tree):
+              if not isinstance(node, ast.Call):
+                  continue
+              if not isinstance(node.func, ast.Name) or node.func.id != "HTMLResponse" or not node.args:
+                  continue
+              arg = node.args[0]
+              if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and "<script>" in arg.value:
+                  html = arg.value
+                  break
+          if html is None:
+              raise SystemExit("Embedded dashboard HTML not found.")
+          scripts = html.split("<script>", 1)[1].split("</script>", 1)[0]
+          Path("dashboard-upgrade.js").write_text(scripts, encoding="utf-8")
+          required = [
+              'id="diffViewer"', 'id="executionLog"', 'id="view-settings"',
+              'id="metricRows"', 'joramalphaeus@gmail.com',
+              'id="paypal-button-container"', 'id="paypalFundingNote"',
+              'https://www.paypal.com/sdk/js?', 'window.paypal.FUNDING.CARD',
+          ]
+          missing = [needle for needle in required if needle not in html]
+          if missing:
+              raise SystemExit("Missing dashboard feature(s): " + ", ".join(missing))
+          print(f"Dashboard feature smoke checks passed; extracted {len(scripts)} JS characters.")
+          PY
+          node --check dashboard-upgrade.js
+      - name: Ensure existing API routes remain present
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          tree = ast.parse(Path("backend/main.py").read_text(encoding="utf-8"))
+          routes = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
+                  for decorator in node.decorator_list:
+                      if isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute):
+                          if isinstance(decorator.func.value, ast.Name) and decorator.func.value.id == "app":
+                              if decorator.args and isinstance(decorator.args[0], ast.Constant):
+                                  routes.add((decorator.func.attr.upper(), decorator.args[0].value))
+          required = {
+              ("POST", "/api/v1/automation/clean-csv"),
+              ("POST", "/api/v1/automation/process-file"),
+              ("GET", "/api/v1/health"),
+              ("GET", "/api/v1/payments/paypal/public-config"),
+              ("POST", "/api/v1/payments/paypal/order"),
+              ("POST", "/api/v1/payments/paypal/capture"),
+              ("GET", "/api/v1/jobs"),
+              ("GET", "/api/v1/jobs/{job_id}"),
+              ("POST", "/api/v1/payments/paypal-webhook"),
+          }
+          missing = required - routes
+          if missing:
+              raise SystemExit(f"Existing route missing: {sorted(missing)}")
+          print("Existing processing, health, jobs, and PayPal webhook routes are still present.")
+          PY
+      - name: Run existing webhook security tests
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+          PAYPAL_CLIENT_ID: ""
+          PAYPAL_CLIENT_SECRET: ""
+          PAYPAL_WEBHOOK_ID: ""
+        run: python -m unittest discover -s tests -p 'test_paypal_webhook.py' -v
+      - name: Run duplicate webhook regression test
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+          PAYPAL_CLIENT_ID: ""
+          PAYPAL_CLIENT_SECRET: ""
+          PAYPAL_WEBHOOK_ID: ""
+        run: python -m unittest discover -s tests -p 'test_paypal_duplicate_webhook.py' -v

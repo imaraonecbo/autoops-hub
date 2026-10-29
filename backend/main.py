@@ -11,7 +11,7 @@ import hmac
 import hashlib
 import json
 from typing import Dict, Any, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Form, Request, status
 from backend import file_processors
 from fastapi.responses import HTMLResponse, Response
@@ -74,10 +74,20 @@ PAYPAL_API_BASE = os.getenv("PAYPAL_API_BASE", PAYPAL_SANDBOX_API_BASE).rstrip("
 PAYPAL_LIVE_ENABLED = os.getenv("PAYPAL_LIVE_ENABLED", "false").strip().lower() in {"true", "1", "yes"}
 COINBASE_WEBHOOK_SECRET = os.getenv("COINBASE_WEBHOOK_SECRET", "").strip()
 
+def _credential_is_configured(value: str) -> bool:
+    normalized = value.strip().lower()
+    return bool(normalized and "placeholder" not in normalized and "unconfigured" not in normalized)
+
+def _paypal_credential_checks() -> Dict[str, bool]:
+    # Report presence only; never expose credential values through health diagnostics.
+    return {
+        "client_id": _credential_is_configured(PAYPAL_CLIENT_ID),
+        "client_secret": _credential_is_configured(PAYPAL_CLIENT_SECRET),
+        "webhook_id": _credential_is_configured(PAYPAL_WEBHOOK_ID),
+    }
+
 def _paypal_credentials_configured() -> bool:
-    values = (PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_WEBHOOK_ID)
-    return all(value and "placeholder" not in value.lower() and "unconfigured" not in value.lower()
-               for value in values)
+    return all(_paypal_credential_checks().values())
 
 def _paypal_mode() -> str:
     if PAYPAL_API_BASE == PAYPAL_LIVE_API_BASE:
@@ -94,6 +104,21 @@ def _assert_paypal_runtime_ready() -> None:
         raise HTTPException(status_code=503, detail="PayPal credentials are not fully configured for this environment.")
     if mode == "live" and not PAYPAL_LIVE_ENABLED:
         raise HTTPException(status_code=503, detail="Live checkout is deliberately disabled until production credentials and merchant configuration are verified.")
+
+
+def _public_app_url() -> str:
+    """Require an explicit HTTPS return URL; never fall back from production to staging."""
+    raw = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+    if not raw:
+        raise HTTPException(status_code=503, detail="Public application URL is not configured for this environment.")
+    parsed = urlsplit(raw)
+    if (parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password
+            or parsed.path or parsed.query or parsed.fragment):
+        raise HTTPException(status_code=503, detail="Public application URL must be a plain HTTPS origin.")
+    if _paypal_mode() == "live" and (parsed.hostname or "").lower() == "autoops-hub-staging.onrender.com":
+        raise HTTPException(status_code=503, detail="Live PayPal checkout cannot return to the staging application.")
+    return raw
+
 
 supabase: Optional[Client] = None
 if SUPABASE_URL and SUPABASE_KEY and "placeholder" not in SUPABASE_URL.lower() and "placeholder" not in SUPABASE_KEY.lower() and "unconfigured" not in SUPABASE_KEY.lower():
@@ -406,8 +431,6 @@ async def process_supported_file(
 
 async def verify_paypal_signature(request: Request, event: Dict[str, Any]) -> None:
     """Ask PayPal's official verification API to validate the exact webhook headers and event."""
-    _assert_paypal_runtime_ready()
-
     header_names = {
         "transmission_id": "PAYPAL-TRANSMISSION-ID",
         "transmission_time": "PAYPAL-TRANSMISSION-TIME",
@@ -421,6 +444,8 @@ async def verify_paypal_signature(request: Request, event: Dict[str, Any]) -> No
         if not value:
             raise HTTPException(status_code=401, detail="Required PayPal signature headers are missing.")
         verification_payload[field] = value
+    # Reject missing signature headers as an authentication failure even if PayPal config is incomplete.
+    _assert_paypal_runtime_ready()
     verification_payload["webhook_id"] = PAYPAL_WEBHOOK_ID
     verification_payload["webhook_event"] = event
 
@@ -497,7 +522,7 @@ async def paypal_webhook(request: Request):
         if tier not in TIERS or float(TIERS[tier][0]) != amount_val:
             raise HTTPException(status_code=400, detail="Recorded checkout tier and capture amount do not match.")
         custom_id = resource.get("custom_id")
-        if custom_id and custom_id != saved.get("user_id"):
+        if custom_id != saved.get("user_id"):
             raise HTTPException(status_code=400, detail="Capture customer metadata does not match the server-recorded checkout.")
         if saved.get("status") == "captured":
             if saved.get("capture_id") != capture_id:
@@ -710,6 +735,8 @@ async def health_check():
         "database_reachable": False,
         "payment_mode": mode,
         "paypal_credentials_configured": _paypal_credentials_configured(),
+        "paypal_credential_checks": _paypal_credential_checks(),
+        "paypal_live_enabled": PAYPAL_LIVE_ENABLED,
         "paypal_checkout_enabled": paypal_ready,
     }
     if supabase is not None:
@@ -737,6 +764,67 @@ async def customer_portal():
 @media(max-width:1080px){.app{grid-template-columns:218px minmax(0,1fr)}.main{padding:0 22px 30px}.hero{grid-template-columns:minmax(0,1fr)}.hero-aside{min-height:190px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.service-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.app{display:block}.sidebar{position:fixed;left:0;top:0;bottom:0;width:255px;height:100dvh;transform:translateX(-105%);transition:transform .2s;box-shadow:15px 0 50px #0007}.sidebar.open{transform:translateX(0)}.main{padding:0 16px 28px}.topbar{height:66px}.mobile-menu{display:block}.breadcrumbs{display:none}.top-actions{gap:8px}.user-detail{display:none}.user-chip{padding-left:8px}.page-head{align-items:flex-start;flex-direction:column}.page-head .btn{align-self:stretch}.service-grid,.flow-grid,.workspace,.settings-grid,.pricing{grid-template-columns:1fr}.hero-copy{padding:23px;min-height:245px}.hero-copy h2{font-size:34px}.hero-aside{min-height:170px}.metrics{gap:9px}.metric{padding:14px}.metric-value{font-size:23px}.section-title{align-items:flex-start;flex-direction:column}.price-card{min-height:auto}.nav-overlay{display:none;position:fixed;inset:0;background:#02060bbb;z-index:19}.nav-overlay.open{display:block}}
 @media(max-width:410px){.main{padding-left:12px;padding-right:12px}.env-pill{font-size:9px;padding:6px 8px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-copy h2{font-size:30px}.metric-value{font-size:21px}}
+
+/* Additive enterprise UI components */
+.telemetry-metrics{grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 8px}
+.telemetry-note{font-size:11px;line-height:1.65;color:#8196b1;margin:8px 2px 24px}
+.metric-live-value{font-variant-numeric:tabular-nums;letter-spacing:-.04em}
+.enterprise-panel{border:1px solid #283a52;background:linear-gradient(155deg,#111e30dd,#0b1422f2);border-radius:16px;padding:18px;min-width:0;box-shadow:inset 0 1px 0 #ffffff05}
+.enterprise-panel h3{margin:0 0 6px;font-size:14px;letter-spacing:-.02em}
+.enterprise-panel .sub{margin:0 0 14px}
+.diff-wrap{margin-top:17px;display:grid;gap:12px}
+.diff-topline{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.diff-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.diff-side{border:1px solid #293a50;border-radius:13px;overflow:hidden;background:#0a1320;min-width:0}
+.diff-side-head{padding:11px 13px;display:flex;justify-content:space-between;align-items:center;gap:9px;border-bottom:1px solid #25364b}
+.diff-side-head strong{font-size:12px;letter-spacing:.02em}
+.diff-side.raw .diff-side-head{background:#2b1820;color:#ffc5cc}
+.diff-side.clean .diff-side-head{background:#112a25;color:#aaf5d7}
+.diff-badge{font-size:10px;border:1px solid #ffffff20;border-radius:100px;padding:4px 8px;white-space:nowrap}
+.diff-content{padding:10px;min-height:140px;max-height:340px;overflow:auto}
+.diff-empty{color:#8195ae;font-size:12px;line-height:1.7;padding:12px}
+.diff-table{border-collapse:separate;border-spacing:0;width:100%;font-size:11px;white-space:nowrap}
+.diff-table th,.diff-table td{padding:7px 9px;border-right:1px solid #223149;border-bottom:1px solid #223149;text-align:left;max-width:210px;overflow:hidden;text-overflow:ellipsis}
+.diff-table th{position:sticky;top:0;background:#18263a;color:#dbe9fc;font-weight:750}
+.diff-table td{color:#b7c5d8;background:#0d1828}
+.diff-table td.diff-bad{background:#351b24;color:#ffc4cd;box-shadow:inset 0 0 0 1px #7a3747}
+.diff-table td.diff-good{background:#123027;color:#b2f6d7;box-shadow:inset 0 0 0 1px #246550}
+.diff-pre{margin:0;padding:10px;background:#0a1320;color:#c5d5e9;font:11px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow:auto;max-height:300px;border-radius:8px}
+.diff-line-bad{display:block;background:#381d25;color:#ffc0ca}
+.diff-line-good{display:block;background:#123027;color:#b8f4d9}
+.terminal-wrap{margin-top:17px;border:1px solid #263850;background:#07101b;border-radius:14px;overflow:hidden;box-shadow:0 12px 35px #0002}
+.terminal-head{padding:11px 13px;background:linear-gradient(90deg,#111f32,#0b1524);display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #24354b}
+.terminal-title{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:750}
+.terminal-lights{display:flex;gap:4px}.terminal-lights i{display:block;width:7px;height:7px;border-radius:50%;background:#61748d}.terminal-lights i:first-child{background:#fb7185}.terminal-lights i:nth-child(2){background:#f7c76b}.terminal-lights i:nth-child(3){background:#4adea2}
+.terminal-state{font-size:10px;border-radius:100px;border:1px solid #34506a;padding:4px 8px;color:#acc0da}
+.terminal-state.running{color:#bcd7ff;border-color:#4a6290;background:#18243a}.terminal-state.success{color:#9af2c4;border-color:#28674d;background:#102b22}.terminal-state.failed{color:#ffbdc5;border-color:#7d3848;background:#321921}
+.execution-stepper{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:12px 13px 3px}
+.exec-step{font-size:10px;color:#647b97;border:1px solid #203147;border-radius:9px;padding:8px 9px;background:#0b1624;display:flex;align-items:center;gap:7px}
+.exec-step .step-number{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1px solid #3a4e67;color:#95abc7;font-weight:750;flex-shrink:0}
+.exec-step.active{border-color:#4d6ea0;color:#d8e7ff;background:#142238}.exec-step.active .step-number{background:#233b5b;border-color:#6e96ce;color:#fff}
+.exec-step.done{border-color:#225744;color:#9fe9c9;background:#10271f}.exec-step.done .step-number{border-color:#347e61;color:#c3ffe2;background:#164431}
+.execution-log{margin:0;padding:13px 15px 15px;min-height:105px;max-height:205px;overflow:auto;color:#99e9c6;font:11px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.terminal-foot{font-size:10px;color:#7187a3;padding:0 14px 12px;line-height:1.6}
+.api-status{display:flex;align-items:flex-start;gap:10px;border:1px solid #28425a;background:#0e1d2e;border-radius:12px;padding:13px;margin-bottom:15px}
+.api-status .status-mark{display:grid;place-items:center;width:26px;height:26px;flex-shrink:0;border-radius:8px;background:#1e344d;color:#b8d7ff;font-weight:900}
+.api-status strong{display:block;color:#e4effe;font-size:12px;margin-bottom:4px}
+.api-status p{margin:0;color:#94a8c0;font-size:11px;line-height:1.65}
+.api-scopes{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}
+.api-scope{font:10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;border:1px solid #2c3e55;border-radius:7px;background:#0a1523;color:#aebfd5;padding:6px 8px}
+.snippet-card{border:1px solid #2a3b52;border-radius:13px;overflow:hidden;background:#080f19;margin-top:12px}
+.snippet-head{display:flex;align-items:center;justify-content:space-between;gap:9px;padding:10px 12px;background:#111d2d;border-bottom:1px solid #28394e}
+.snippet-head strong{font-size:11px;color:#dbe8f9}
+.snippet-code{display:block;overflow:auto;max-height:320px;padding:13px;color:#b8d6f7;font:11px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}
+.support-card{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.support-email{font-size:15px;font-weight:750;color:#b9d5ff;overflow-wrap:anywhere}
+.support-meta{font-size:11px;line-height:1.7;color:#8ca2bd}
+.enterprise-divider{height:1px;background:linear-gradient(90deg,transparent,#2b4059,transparent);margin:15px 0}
+.enterprise-tag{display:inline-flex;align-items:center;gap:6px;border:1px solid #315442;background:#10271f;color:#a8f4d0;border-radius:100px;font-size:10px;font-weight:750;padding:5px 9px}
+.enterprise-tag.muted{border-color:#36465d;background:#111d2d;color:#a6bad3}
+@media(max-width:1120px){.telemetry-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.diff-grid{grid-template-columns:1fr}}
+@media(max-width:760px){.telemetry-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.execution-stepper{grid-template-columns:1fr}.diff-content{max-height:260px}.support-card{display:block}.support-card .btn{margin-top:12px}}
+@media(max-width:430px){.telemetry-metrics{grid-template-columns:1fr}.enterprise-panel{padding:13px}.execution-log{font-size:10px}}
+
 </style>
 </head>
 <body>
@@ -751,11 +839,11 @@ async def customer_portal():
 <button class="nav-link" data-view="settings"><span class="ico">⚙</span>Settings</button>
 </nav></div>
 <div class="sidebar-spacer"></div>
-<div class="side-status"><div class="status-line"><span class="dot"></span><span id="sideEnvTitle">Sandbox environment</span></div><p id="sideEnvCopy">Test orders only. Live billing is not enabled for this workspace.</p></div>
+<div class="side-status"><div class="status-line"><span class="dot"></span><span>Account security</span></div><p>Your reports are private to your signed-in account.</p></div>
 <div class="side-foot">AUTOMATION WORKSPACE<br>Secure account · Private reports</div>
 </aside>
 <main class="main">
-<header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="menuBtn" aria-label="Open navigation">☰</button><div class="breadcrumbs">AutoOps Hub <span style="color:#506680">/</span> <strong id="crumbTitle">Overview</strong></div></div><div class="top-actions"><span class="env-pill"><span class="dot"></span>Sandbox</span><div class="user-chip"><div class="avatar" id="topAvatar">A</div><div class="user-detail"><strong id="topUserName">Guest workspace</strong><small id="topUserMeta">Sign in to sync reports</small></div></div></div></header>
+<header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="menuBtn" aria-label="Open navigation">☰</button><div class="breadcrumbs">AutoOps Hub <span style="color:#506680">/</span> <strong id="crumbTitle">Overview</strong></div></div><div class="top-actions"><span class="env-pill"><span class="dot"></span>Secure workspace</span><div class="user-chip"><div class="avatar" id="topAvatar">A</div><div class="user-detail"><strong id="topUserName">Guest workspace</strong><small id="topUserMeta">Sign in to sync reports</small></div></div></div></header>
 <section class="view active" id="view-overview" data-page="overview">
 <div class="page-head"><div><div class="eyebrow">Workspace overview</div><h1>Good work starts with clean data.</h1><p>Run repeatable CSV cleanup jobs, inspect data-quality results, and keep every report linked to your account. Your workspace gives you one place to process, review, and retrieve the outputs.</p></div><button class="btn" id="overviewStartJob">＋ Create a cleanup job</button></div>
 <div class="hero"><div class="hero-copy"><div class="eyebrow">DATA OPERATIONS · MADE PRACTICAL</div><h2>From raw spreadsheets to <span>decision-ready files.</span></h2><p>Standardize headers, normalize cell whitespace, remove blank or duplicate rows on eligible tiers, and produce a saved output with a transparent quality summary. No inflated promises — just a clear workflow and a report you can retrieve.</p><div class="hero-actions"><button class="btn" id="heroJobBtn">Start a CSV job <span>→</span></button><button class="btn secondary" id="heroPlansBtn">Compare plans</button></div></div>
@@ -764,8 +852,13 @@ async def customer_portal():
 <article class="metric"><div class="metric-label">Saved jobs</div><div class="metric-row"><div><div class="metric-value" id="metricJobs">—</div><div class="metric-note">Jobs in your report history</div></div><div class="metric-symbol">▤</div></div></article>
 <article class="metric"><div class="metric-label">Current access</div><div class="metric-row"><div><div class="metric-value" id="metricTier" style="font-size:20px">Guest</div><div class="metric-note" id="metricTierNote">Sign in to view your tier</div></div><div class="metric-symbol">◇</div></div></article>
 <article class="metric"><div class="metric-label">Latest report</div><div class="metric-row"><div><div class="metric-value" id="metricLatest" style="font-size:16px">—</div><div class="metric-note" id="metricLatestNote">No job completed yet</div></div><div class="metric-symbol">↗</div></div></article>
-<article class="metric"><div class="metric-label">Payment mode</div><div class="metric-row"><div><div class="metric-value" style="font-size:20px">Sandbox</div><div class="metric-note">No live payments enabled</div></div><div class="metric-symbol">◎</div></div></article>
+ </div>
+<div class="grid metrics telemetry-metrics" aria-label="Live workspace telemetry">
+<article class="metric"><div class="metric-label">Rows processed · recent reports</div><div class="metric-row"><div><div class="metric-value metric-live-value" id="metricRows">—</div><div class="metric-note" id="metricRowsNote">Sign in to summarize recent reports</div></div><div class="metric-symbol">▦</div></div></article>
+<article class="metric"><div class="metric-label">Estimated time saved</div><div class="metric-row"><div><div class="metric-value metric-live-value" id="metricHours">—</div><div class="metric-note" id="metricHoursNote">Estimate, not a measured result</div></div><div class="metric-symbol">◷</div></div></article>
+<article class="metric"><div class="metric-label">Latest API response</div><div class="metric-row"><div><div class="metric-value metric-live-value" id="metricLatency">—</div><div class="metric-note" id="metricLatencyNote">Waiting for the first request</div></div><div class="metric-symbol">⌁</div></div></article>
 </div>
+<div class="telemetry-note">Telemetry summarizes recent account reports. Time saved is an estimate (2 minutes per 1,000 rows), not a measured business outcome. API latency is observed in this browser.</div>
 <div class="section-title"><div><h2>Capabilities in this workspace</h2><p>Features customers can use in the current CSV cleanup service.</p></div><button class="btn ghost small" data-go="billing">View plan limits</button></div>
 <div class="grid service-grid">
 <article class="service"><div class="service-icon">↔</div><h3>Normalize headers and values</h3><p>Clean header spacing, lowercase column labels, replace header spaces with underscores, and trim cell whitespace.</p><div class="meta">CORE CSV CLEANUP</div></article>
@@ -778,36 +871,57 @@ async def customer_portal():
 </section>
 <section class="view" id="view-jobs" data-page="jobs">
 <div class="page-head"><div><div class="eyebrow">Execution centre</div><h1>Jobs &amp; reports</h1><p>Submit CSVs, Excel workbooks, JSON payloads, server logs, merchant catalogs, order exports, or user identity exports according to your selected tier. Retrieve completed results from your account history.</p></div><span class="tag">Multi-format engine</span></div>
-<div class="workspace"><section class="card"><h3>Submit a new job</h3><p class="sub">Choose a supported file and workload. Basic supports CSV cleanup; Scale adds Excel, JSON and logs; Ultimate adds merchant, order and identity workloads.</p><div class="field"><label for="csv">INPUT FILE (.CSV, .XLSX, .XLS, .JSON, .LOG)</label><input id="csv" type="file" accept=".csv,.xlsx,.xls,.json,.log,text/csv,application/json,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"></div><div class="field"><label for="operation">PROCESSING WORKLOAD</label><select id="operation"><option value="auto">Auto-detect by file type</option><option value="csv_clean">CSV header and whitespace cleanup</option><option value="excel_consolidate">Excel workbook consolidation (.xlsx/.xls)</option><option value="json_clean">JSON payload formatting and anomaly scan</option><option value="json_filter_anomalies">Filter JSON event arrays to error/anomaly records (Scale+)</option><option value="log_analyze">Server log and stack-trace analysis</option><option value="catalog_normalize">Merchant product catalog normalization (Ultimate)</option><option value="order_normalize">E-commerce order export normalization (Ultimate)</option><option value="identity_sanitize">User export email and duplicate identity sanitization (Ultimate)</option></select></div><button class="btn block" id="submitJobBtn">Process file &amp; generate report →</button><div class="notice" id="jobNotice" role="status" aria-live="polite"></div><div style="height:1px;background:var(--line);margin:20px 0"></div><h3>Supported processing</h3><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>CSV header and whitespace cleanup remains available.</span></div><div class="security-item"><span class="security-check">✓</span><span>Scale: multi-sheet workbook consolidation, JSON formatting, log parsing, deduplication, and missing-value analysis.</span></div><div class="security-item"><span class="security-check">✓</span><span>Ultimate: catalog, order and user export normalization with quality flags.</span></div></div></section>
+<div class="workspace"><section class="card"><h3>Submit a new job</h3><p class="sub">Choose a supported file and workload. Basic supports CSV cleanup; Scale adds Excel, JSON and logs; Ultimate adds merchant, order and identity workloads.</p><div class="field"><label for="csv">INPUT FILE (.CSV, .XLSX, .XLS, .JSON, .LOG)</label><input id="csv" type="file" accept=".csv,.xlsx,.xls,.json,.log,text/csv,application/json,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"></div><div class="field"><label for="operation">PROCESSING WORKLOAD</label><select id="operation"><option value="auto">Auto-detect by file type</option><option value="csv_clean">CSV header and whitespace cleanup</option><option value="excel_consolidate">Excel workbook consolidation (.xlsx/.xls)</option><option value="json_clean">JSON payload formatting and anomaly scan</option><option value="json_filter_anomalies">Filter JSON event arrays to error/anomaly records (Scale+)</option><option value="log_analyze">Server log and stack-trace analysis</option><option value="catalog_normalize">Merchant product catalog normalization (Ultimate)</option><option value="order_normalize">E-commerce order export normalization (Ultimate)</option><option value="identity_sanitize">User export email and duplicate identity sanitization (Ultimate)</option></select></div><button class="btn block" id="submitJobBtn">Process file &amp; generate report →</button><div class="notice" id="jobNotice" role="status" aria-live="polite"></div>
+<section class="terminal-wrap" aria-label="Client-observed execution trace">
+<div class="terminal-head"><div class="terminal-title"><span class="terminal-lights"><i></i><i></i><i></i></span><span>Execution terminal</span></div><span class="terminal-state" id="terminalState">Idle</span></div>
+<div class="execution-stepper"><div class="exec-step" id="stepUpload"><span class="step-number">1</span> Upload &amp; validate</div><div class="exec-step" id="stepProcess"><span class="step-number">2</span> Engine response</div><div class="exec-step" id="stepComplete"><span class="step-number">3</span> Result ready</div></div>
+<pre class="execution-log" id="executionLog" aria-live="polite">[ready] Choose a file to prepare an execution trace.
+[info] This terminal shows client-observed milestones; the backend does not currently stream internal worker events.</pre>
+<div class="terminal-foot">No fabricated server progress. Durations are measured from this browser's request/response timings.</div>
+</section>
+<section class="enterprise-panel diff-wrap" id="diffViewer" aria-label="Before and after data inspector">
+<div class="diff-topline"><div><h3>Before / after inspector</h3><p class="sub">Raw values are compared with the actual output returned by the engine.</p></div><span class="enterprise-tag muted" id="diffState">Waiting for a file</span></div>
+<div class="diff-grid"><div class="diff-side raw"><div class="diff-side-head"><strong>RAW INPUT PREVIEW</strong><span class="diff-badge">Needs review</span></div><div class="diff-content" id="diffRaw"><div class="diff-empty">Choose a file to preview its first rows or lines.</div></div></div>
+<div class="diff-side clean"><div class="diff-side-head"><strong>CLEANED OUTPUT PREVIEW</strong><span class="diff-badge">Engine result</span></div><div class="diff-content" id="diffClean"><div class="diff-empty">The cleaned result will appear after processing completes.</div></div></div></div>
+<div class="support-meta" id="diffFootnote">Preview is limited to a small sample; downloaded output remains the full server result.</div>
+</section>
+<div style="height:1px;background:var(--line);margin:20px 0"></div><h3>Supported processing</h3><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>CSV header and whitespace cleanup remains available.</span></div><div class="security-item"><span class="security-check">✓</span><span>Scale: multi-sheet workbook consolidation, JSON formatting, log parsing, deduplication, and missing-value analysis.</span></div><div class="security-item"><span class="security-check">✓</span><span>Ultimate: catalog, order and user export normalization with quality flags.</span></div></div></section>
 <section class="card"><div class="section-title" style="margin:0 0 13px"><div><h3>Report history</h3><p>Only reports belonging to your account are shown.</p></div><button class="btn secondary small" id="refreshBtn">↻ Refresh</button></div><div id="reportList" class="report-empty">Sign in to load your private report history.</div><div id="reportResult"></div></section></div>
 </section>
 <section class="view" id="view-billing" data-page="billing">
-<div class="page-head"><div><div class="eyebrow">Access &amp; billing</div><h1>Plans built around real work.</h1><p>Every plan includes the core CSV cleanup workflow. Higher tiers increase the permitted file size and add distinct cleanup and data-quality capabilities.</p></div><span class="env-pill"><span class="dot"></span>Sandbox checkout</span></div>
-<div class="plan-note"><strong>Testing notice:</strong> These are the requested Sandbox one-time prices and job-credit packages, not recurring subscriptions. Sandbox transactions do not pay out real funds. Live billing remains disabled until production credentials and merchant ownership are verified.</div>
+<div class="page-head"><div><div class="eyebrow">Access &amp; billing</div><h1>Plans built around real work.</h1><p>Every plan includes the core CSV cleanup workflow. Higher tiers increase the permitted file size and add distinct cleanup and data-quality capabilities.</p></div></div>
+<div class="plan-note"><strong>One-time payment notice:</strong> Each plan is a single purchase, not a recurring subscription. Job credits are granted only after the server verifies a completed PayPal capture and records the transaction against the signed-in customer.</div>
 <div class="grid pricing">
-<article class="price-card" data-price-tier="tier_1_51"><div class="plan-label">BASIC · ESSENTIAL CLEANUP</div><div class="price">$79</div><div class="once">USD · one-time Sandbox test purchase</div><p class="feature-note">For dependable, everyday CSV preparation.</p><ul><li>Standardize CSV headers and trim cell whitespace</li><li>Up to 2,500 data rows per file</li><li>30 jobs included per purchase</li><li>Private saved reports and cleaned CSV output</li><li>Historical report retrieval</li></ul><button class="btn plan-select" data-tier="tier_1_51">Select Basic</button></article>
-<article class="price-card featured" data-price-tier="tier_2_83"><div class="plan-label">SCALE · TECHNICAL OPERATIONS</div><div class="price">$149</div><div class="once">USD · one-time Sandbox test purchase</div><p class="feature-note">For teams working with spreadsheets, JSON payloads and operational logs.</p><ul><li><b>Everything in Basic, plus:</b></li><li>Multi-sheet Excel (.xlsx) cleaning and consolidation</li><li>JSON payload formatting and error-field scan</li><li>Filter JSON event arrays to error/exception records</li><li>Server log parsing and structured stack-trace summaries</li><li>Blank-row removal, exact deduplication and missing-value counts</li><li>Up to 25,000 rows or entries per file</li><li>300 jobs included per purchase</li></ul><button class="btn plan-select" data-tier="tier_2_83">Select Scale</button></article>
-<article class="price-card" data-price-tier="tier_3_129"><div class="plan-label">ULTIMATE · MERCHANT &amp; ENTERPRISE</div><div class="price">$299</div><div class="once">USD · one-time Sandbox test purchase</div><p class="feature-note">For high-volume catalogs, order exports, and data-quality review.</p><ul><li><b>Everything in Scale, plus:</b></li><li>Catalog SKU, price and inventory standardization for sync-ready exports (external store writes are not enabled)</li><li>Order price, currency, address and phone normalization</li><li>User export email validation and duplicate identity resolution</li><li>Deep type inference, anomaly detection and quality flags</li><li>Enterprise API route and retrievable historical reports</li><li>Up to 250,000 rows or entries per file</li><li>1,500 jobs included per purchase</li></ul><button class="btn plan-select" data-tier="tier_3_129">Select Ultimate</button></article>
+<article class="price-card" data-price-tier="tier_1_51"><div class="plan-label">BASIC · ESSENTIAL CLEANUP</div><div class="price">$79</div><div class="once">USD · one-time payment</div><p class="feature-note">For dependable, everyday CSV preparation.</p><ul><li>Standardize CSV headers and trim cell whitespace</li><li>Up to 2,500 data rows per file</li><li>30 jobs included per purchase</li><li>Private saved reports and cleaned CSV output</li><li>Historical report retrieval</li></ul><button class="btn plan-select" data-tier="tier_1_51">Select Basic</button></article>
+<article class="price-card featured" data-price-tier="tier_2_83"><div class="plan-label">SCALE · TECHNICAL OPERATIONS</div><div class="price">$149</div><div class="once">USD · one-time payment</div><p class="feature-note">For teams working with spreadsheets, JSON payloads and operational logs.</p><ul><li><b>Everything in Basic, plus:</b></li><li>Multi-sheet Excel (.xlsx) cleaning and consolidation</li><li>JSON payload formatting and error-field scan</li><li>Filter JSON event arrays to error/exception records</li><li>Server log parsing and structured stack-trace summaries</li><li>Blank-row removal, exact deduplication and missing-value counts</li><li>Up to 25,000 rows or entries per file</li><li>300 jobs included per purchase</li></ul><button class="btn plan-select" data-tier="tier_2_83">Select Scale</button></article>
+<article class="price-card" data-price-tier="tier_3_129"><div class="plan-label">ULTIMATE · MERCHANT &amp; ENTERPRISE</div><div class="price">$299</div><div class="once">USD · one-time payment</div><p class="feature-note">For high-volume catalogs, order exports, and data-quality review.</p><ul><li><b>Everything in Scale, plus:</b></li><li>Catalog SKU, price and inventory standardization for sync-ready exports (external store writes are not enabled)</li><li>Order price, currency, address and phone normalization</li><li>User export email validation and duplicate identity resolution</li><li>Deep type inference, anomaly detection and quality flags</li><li>Enterprise API route and retrievable historical reports</li><li>Up to 250,000 rows or entries per file</li><li>1,500 jobs included per purchase</li></ul><button class="btn plan-select" data-tier="tier_3_129">Select Ultimate</button></article>
 </div>
-<div class="workspace" style="margin-top:16px"><section class="card"><h3>Complete Sandbox checkout</h3><p class="sub">Sign in to AutoOps Hub first. You will then be redirected to PayPal Sandbox to approve the selected test order.</p><div class="field"><label for="tier">SELECT PLAN</label><select id="tier"><option value="tier_1_51">Basic — $79 USD</option><option value="tier_2_83">Scale — $149 USD</option><option value="tier_3_129">Ultimate — $299 USD</option></select></div><button class="btn block" id="checkoutBtn">Continue to PayPal Sandbox →</button><div class="notice" id="billingNotice" role="status" aria-live="polite"></div></section>
-<section class="card"><h3>Billing clarity</h3><p class="sub">The current integration creates a one-time Sandbox order. Automatic renewals, invoices, refunds, tax calculation, and a customer-facing payment management portal are not represented as available features yet.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Order is created by the server and associated with the signed-in account.</span></div><div class="security-item"><span class="security-check">✓</span><span>Capture amount and plan are checked before a tier upgrade is applied.</span></div><div class="security-item"><span class="security-check">!</span><span>Live processing remains disabled until a complete end-to-end test and merchant verification.</span></div></div></section></div>
+<div class="workspace" style="margin-top:16px"><section class="card"><h3>Complete PayPal checkout</h3><p class="sub">Sign in to AutoOps Hub first. PayPal will securely ask you to approve the one-time payment before the order is completed.</p><div class="field"><label for="tier">SELECT PLAN</label><select id="tier"><option value="tier_1_51">Basic — $79 USD</option><option value="tier_2_83">Scale — $149 USD</option><option value="tier_3_129">Ultimate — $299 USD</option></select></div><div id="paypal-button-container" aria-label="Available PayPal payment methods"></div><p class="sub" id="paypalFundingNote" aria-live="polite">Loading payment options supported for your account and the customer’s location.</p><button class="btn block" id="checkoutBtn" style="display:none" disabled>Continue to PayPal →</button><div class="notice" id="billingNotice" role="status" aria-live="polite"></div></section>
+<section class="card"><h3>Billing clarity</h3><p class="sub">The current integration creates a one-time PayPal order. Automatic renewals, invoices, refunds, tax calculation, and a customer-facing payment management portal are not represented as available features yet.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Order is created by the server and associated with the signed-in account.</span></div><div class="security-item"><span class="security-check">✓</span><span>Capture amount and plan are checked before a tier upgrade is applied.</span></div><div class="security-item"><span class="security-check">!</span><span>Payment processing is confirmed by the server before credits are granted; if checkout is unavailable, try again later or contact support.</span></div></div></section></div>
 </section>
+
 <section class="view" id="view-settings" data-page="settings">
 <div class="page-head"><div><div class="eyebrow">Workspace control</div><h1>Settings</h1><p>Manage your current session and workspace preferences. Payment credentials are intentionally kept on the server rather than exposed in browser settings.</p></div><span class="tag">Account preferences</span></div>
 <div class="grid settings-grid">
 <section class="card"><h3>Account &amp; session</h3><p class="sub">Your signed-in identity and current access status.</p>
-<div id="authControls"><div class="field"><label for="email">EMAIL ADDRESS</label><input id="email" type="email" autocomplete="email" placeholder="you@example.com"></div><div class="field"><label for="password">PASSWORD</label><input id="password" type="password" autocomplete="current-password" minlength="10" placeholder="At least 10 characters"></div><button class="btn block" id="signupBtn">Create account</button><button class="btn secondary block" id="loginBtn" style="margin-top:9px">Sign in</button><div class="sub" style="margin:12px 0 0">Use an email-confirmed account to create orders and save reports.</div></div>
+<div id="authControls"><div class="field"><label for="email">EMAIL ADDRESS</label><input id="email" type="email" autocomplete="email" placeholder="you@example.com"></div><div class="field"><label for="password">PASSWORD</label><input id="password" type="password" autocomplete="current-password" minlength="10" placeholder="At least 10 characters"></div><button class="btn block" id="signupBtn">Create account</button><button class="btn secondary block" id="loginBtn" style="margin-top:9px">Sign in</button><button class="btn ghost block" id="forgotPasswordBtn" style="margin-top:9px">Forgot password?</button>
+<div id="passwordRecoveryPanel" hidden style="margin-top:14px">
+<div class="field"><label for="recoveryPassword">NEW PASSWORD</label><input id="recoveryPassword" type="password" autocomplete="new-password" minlength="10" maxlength="256" placeholder="At least 10 characters"></div>
+<div class="field"><label for="recoveryPasswordConfirm">CONFIRM NEW PASSWORD</label><input id="recoveryPasswordConfirm" type="password" autocomplete="new-password" minlength="10" maxlength="256" placeholder="Enter the new password again"></div>
+<button class="btn block" id="updatePasswordBtn">Update password</button>
+</div><div class="sub" style="margin:12px 0 0">Use an email-confirmed account to create orders and save reports.</div></div>
 <div id="signedInPanel" hidden><div class="account-big"><div class="avatar" id="settingsAvatar">A</div><div><div class="account-email" id="signedInLabel">Signed in</div><div class="account-caption" id="settingsAccountCaption">Authenticated workspace</div></div></div><button class="btn ghost block" id="logoutBtn">Sign out of this session</button></div>
 <div class="notice" id="settingsAccountNotice" role="status" aria-live="polite"></div></section>
 <section class="card"><h3>Workspace preferences</h3><p class="sub">These display preferences are saved in this browser; they do not change billing or permissions.</p>
 <div class="setting-row"><div><strong>Compact workspace</strong><p>Reduce card spacing so more information fits on screen.</p></div><label class="switch"><input id="compactMode" type="checkbox"><span class="switch-track"></span></label></div>
 <div class="setting-row"><div><strong>Show completed job details first</strong><p>Open the latest saved report automatically when loading history.</p></div><label class="switch"><input id="autoOpenLatest" type="checkbox"><span class="switch-track"></span></label></div>
 <div class="notice show" id="preferenceNotice">Changes apply immediately and stay in this browser.</div></section>
-<section class="card"><h3>Payment environment</h3><p class="sub">This customer workspace is connected to PayPal Sandbox. The dashboard must never store client secrets or merchant credentials in browser-accessible settings.</p><div class="setting-row"><div><strong>Active checkout mode</strong><p>PayPal Sandbox · one-time test orders only</p></div><span class="tag">Sandbox</span></div><div class="setting-row"><div><strong>Merchant receiving account</strong><p>Determined by the PayPal REST app and merchant configuration used by the server. Not verified as live.</p></div><span class="tag">Not verified</span></div><a href="https://dashboard.render.com/web/srv-db7kcpuk1f9s7382q7q0" class="btn secondary block" target="_blank" rel="noopener">Open server configuration in Render ↗</a></section>
+
 <section class="card"><h3>Security &amp; privacy</h3><p class="sub">Controls that protect customer accounts and report history.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Account endpoints verify the Supabase session token server-side.</span></div><div class="security-item"><span class="security-check">✓</span><span>Report queries are scoped to the signed-in user's account.</span></div><div class="security-item"><span class="security-check">✓</span><span>PayPal client secrets belong in Render environment variables, never HTML, JavaScript, or public repository files.</span></div></div></section>
 </div>
+<section class="enterprise-panel support-card"><div><div class="eyebrow">Human support</div><h3>Need a hand with your workspace?</h3><p class="support-meta">Contact support for account access, job failures, payment questions or developer-access requests. Never email passwords, API tokens, PayPal secrets, or webhook signing credentials.</p><div style="margin-top:10px"><a class="support-email" href="https://mail.google.com/mail/?view=cm&fs=1&to=joramalphaeus%40gmail.com&su=AutoOps%20Hub%20Support" target="_blank" rel="noopener noreferrer">joramalphaeus@gmail.com</a></div></div><a class="btn secondary" href="https://mail.google.com/mail/?view=cm&fs=1&to=joramalphaeus%40gmail.com&su=AutoOps%20Hub%20Support" target="_blank" rel="noopener noreferrer">Contact support →</a></section>
 </section>
-<footer class="footer"><span>AutoOps Hub · Operations workspace</span><span>Sandbox mode · No real payments are processed in this environment.</span></footer>
+<footer class="footer"><span>AutoOps Hub · Customer workspace</span><span>Support: <a href="https://mail.google.com/mail/?view=cm&fs=1&to=joramalphaeus%40gmail.com&su=AutoOps%20Hub%20Support" target="_blank" rel="noopener noreferrer">joramalphaeus@gmail.com</a> · One-time checkout verified server-side.</span></footer>
 </main>
 </div>
 <script>
@@ -816,25 +930,146 @@ async def customer_portal():
 const $=id=>document.getElementById(id);
 const accountNotice=$('accountNotice'),jobNotice=$('jobNotice'),reportList=$('reportList'),reportResult=$('reportResult'),billingNotice=$('billingNotice'),settingsAccountNotice=$('settingsAccountNotice');
 const authControls=$('authControls'),signedInPanel=$('signedInPanel'),signedInLabel=$('signedInLabel');
-let currentUser=null,currentProfile=null,reportsCache=[],paymentMode='sandbox',paymentsEnabled=false;
+let currentUser=null,currentProfile=null,reportsCache=[],paymentMode='sandbox',paymentsEnabled=false,lastApiLatencyMs=null,lastExecutionStarted=0,lastRawPreviewFile=null,lastRawPreviewText=null,paypalFundingInitializationAttempted=false;
 async function configurePaymentMode(){
-  const pill=document.querySelector('.env-pill');
   try{
     const health=await api('/api/v1/health');
     paymentMode=health.payment_mode||'sandbox';
     paymentsEnabled=health.paypal_checkout_enabled===true;
-    if(pill)pill.innerHTML='<span class="dot"></span>'+(paymentMode==='live'?'Live payments':paymentMode==='sandbox'?'Sandbox':'Payment configuration invalid');
+    const environmentLabel=paymentMode==='live'?'Live':paymentMode==='sandbox'?'Sandbox':'Invalid';
+    const topPill=$('topEnvPill');
+    if(topPill)topPill.innerHTML='<span class="dot"></span>'+(paymentsEnabled?environmentLabel+' payments':environmentLabel+' setup incomplete');
+    const sideTitle=$('sideEnvTitle');
+    if(sideTitle)sideTitle.textContent=paymentsEnabled?environmentLabel+' payment environment':environmentLabel+' checkout not enabled';
+    const sideCopy=$('sideEnvCopy');
+    if(sideCopy)sideCopy.textContent=paymentsEnabled?'One-time PayPal checkout is enabled. Captures are verified server-side before credits are granted.':'Checkout stays disabled until PayPal and database configuration are verified.';
+    const metric=$('paymentModeMetric');
+    if(metric)metric.textContent=environmentLabel;
+    const metricNote=$('paymentModeMetricNote');
+    if(metricNote)metricNote.textContent=paymentsEnabled?'One-time checkout enabled':'Checkout disabled pending verification';
+    const billingPill=$('billingEnvPill');
+    if(billingPill)billingPill.innerHTML='<span class="dot"></span>'+environmentLabel+' checkout';
+    const activeMode=$('activeCheckoutMode');
+    if(activeMode)activeMode.textContent='PayPal '+environmentLabel+' · one-time purchases'+(paymentsEnabled?' enabled':' disabled pending verification');
+    const activeTag=$('activeCheckoutTag');
+    if(activeTag)activeTag.textContent=paymentsEnabled?'Enabled':'Disabled';
     const button=$('checkoutBtn');
-    if(button&&!paymentsEnabled){button.title='Checkout is disabled until PayPal and database configuration are verified.';button.setAttribute('aria-disabled','true')}
-    if(button&&paymentsEnabled){button.removeAttribute('aria-disabled');button.title='Continue to '+(paymentMode==='live'?'PayPal':'PayPal Sandbox')}
+    if(button){
+      button.disabled=!paymentsEnabled;
+      button.textContent=paymentsEnabled?'Continue to PayPal →':'Checkout temporarily unavailable';
+      button.title=paymentsEnabled?'Continue to PayPal if the payment choices below cannot load.':'Checkout is disabled until payment and database readiness are verified.';
+      button.style.display=paymentsEnabled?'none':'block';
+      if(paymentsEnabled)button.removeAttribute('aria-disabled');else button.setAttribute('aria-disabled','true');
+    }
+    if(paymentsEnabled)await initializePayPalFundingButtons();
   }catch(e){
     paymentsEnabled=false;
+    const pill=$('topEnvPill');
     if(pill)pill.innerHTML='<span class="dot"></span>Payment status unavailable';
+    const sideCopy=$('sideEnvCopy');
+    if(sideCopy)sideCopy.textContent='Your reports are private to your signed-in account.';
+    const button=$('checkoutBtn');if(button){button.disabled=true;button.textContent='Checkout temporarily unavailable';button.style.display='block';button.setAttribute('aria-disabled','true');}
+    const container=$('paypal-button-container');if(container)container.replaceChildren();
+    const fundingNote=$('paypalFundingNote');if(fundingNote)fundingNote.textContent='PayPal payment options are temporarily unavailable.';
+  }
+}
+async function initializePayPalFundingButtons(){
+  if(paypalFundingInitializationAttempted||!paymentsEnabled)return;
+  paypalFundingInitializationAttempted=true;
+  const container=$('paypal-button-container'),fallback=$('checkoutBtn'),fundingNote=$('paypalFundingNote');
+  if(!container)return;
+  try{
+    const config=await api('/api/v1/payments/paypal/public-config');
+    if(!config.enabled||!config.client_id)throw new Error('PayPal public checkout configuration is not ready.');
+    if(!window.paypal||typeof window.paypal.Buttons!=='function'){
+      await new Promise((resolve,reject)=>{
+        const script=document.createElement('script');
+        const params=new URLSearchParams({
+          'client-id':config.client_id,
+          currency:config.currency||'USD',
+          intent:'capture',
+          components:'buttons'
+        });
+        script.src='https://www.paypal.com/sdk/js?'+params.toString();
+        script.async=true;
+        const timeout=window.setTimeout(()=>reject(new Error('PayPal checkout SDK timed out.')),15000);
+        script.onload=()=>{window.clearTimeout(timeout);resolve();};
+        script.onerror=()=>{window.clearTimeout(timeout);reject(new Error('PayPal checkout SDK failed to load.'));};
+        document.head.appendChild(script);
+      });
+    }
+    if(!window.paypal||typeof window.paypal.Buttons!=='function'||!window.paypal.FUNDING)throw new Error('PayPal funding eligibility is unavailable.');
+    const allowedSources=[
+      window.paypal.FUNDING.PAYPAL,
+      window.paypal.FUNDING.CARD,
+      window.paypal.FUNDING.PAYLATER,
+      window.paypal.FUNDING.CREDIT,
+      window.paypal.FUNDING.VENMO
+    ].filter(Boolean);
+    let rendered=0;
+    for(const fundingSource of allowedSources){
+      const button=window.paypal.Buttons({
+        fundingSource,
+        style:{layout:'vertical',shape:'rect',height:46},
+        createOrder:async function(){
+          if(!paymentsEnabled)throw new Error('PayPal checkout is temporarily unavailable.');
+          const signedIn=await loadAccount(true);
+          if(!signedIn){setNavView('settings');throw new Error('Please sign in to AutoOps Hub before starting checkout.');}
+          const order=await api('/api/v1/payments/paypal/order',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({tier:$('tier').value})
+          });
+          if(!order.order_id)throw new Error('PayPal did not return a valid order ID.');
+          return order.order_id;
+        },
+        onApprove:async function(data){
+          if(!data.orderID){notice(billingNotice,'PayPal returned no order ID. Do not retry payment until the order has been checked.','error');return;}
+          try{
+            const result=await api('/api/v1/payments/paypal/capture',{
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({order_id:data.orderID})
+            });
+            window.history.replaceState({},'',window.location.pathname+'#billing');
+            notice(billingNotice,result.message||'Payment verified and account updated.','good');
+            await loadAccount(true);
+            await loadReports();
+          }catch(error){
+            notice(billingNotice,'PayPal approved the order, but AutoOps Hub could not confirm the final result yet. Do not pay again; refresh Billing or contact support.','error');
+            console.error('PayPal order confirmation needs follow-up:',error);
+          }
+        },
+        onCancel:function(){
+          notice(billingNotice,'Checkout was cancelled. No payment was confirmed. You can choose a payment option and try again.','error');
+        },
+        onError:function(error){
+          console.error('PayPal checkout error:',error);
+          notice(billingNotice,'That PayPal payment option could not be completed. Try another available option or use Continue to PayPal.','error');
+        }
+      });
+      if(button.isEligible()){
+        try{
+          await button.render('#paypal-button-container');
+          rendered++;
+        }catch(error){
+          console.warn('Could not render an eligible PayPal funding button:',fundingSource,error);
+        }
+      }
+    }
+    if(!rendered)throw new Error('No PayPal button is currently eligible for this account and browser.');
+    if(fallback)fallback.style.display='none';
+    if(fundingNote)fundingNote.textContent='Choose a method enabled by PayPal for your account and eligible for your location, device and currency. Card and additional wallet/financing options vary by buyer.';
+  }catch(error){
+    console.warn('PayPal funding buttons could not be loaded; retaining hosted checkout fallback.',error);
+    if(fallback)fallback.style.display='block';
+    if(fundingNote)fundingNote.textContent='PayPal could not load the expanded payment choices. You can still continue through PayPal checkout.';
+    notice(billingNotice,'Additional PayPal payment buttons could not be loaded. The Continue to PayPal option remains available.','error');
   }
 }
 function notice(el,message,type){if(!el)return;el.textContent=message;el.className='notice show'+(type?' '+type:'')}
 function errorMessage(data,status){if(data&&typeof data.detail==='string')return data.detail;if(data&&data.detail&&typeof data.detail==='object')return data.detail.message||JSON.stringify(data.detail);if(data&&data.message)return data.message;return 'Request failed ('+status+'). Please try again.'}
-async function api(path,options){const response=await fetch(path,Object.assign({credentials:'same-origin'},options||{}));let data={};try{data=await response.json()}catch(e){}if(!response.ok)throw new Error(errorMessage(data,response.status));return data}
+async function api(path,options){const started=performance.now();let response;try{response=await fetch(path,Object.assign({credentials:'same-origin'},options||{}))}catch(e){updateLatencyKpi(path,performance.now()-started);throw e}const latency=performance.now()-started;lastApiLatencyMs=latency;updateLatencyKpi(path,latency);let data={};try{data=await response.json()}catch(e){}if(!response.ok)throw new Error(errorMessage(data,response.status));return data}
 async function busy(button,work){if(!button||button.disabled)return;const old=button.textContent;button.disabled=true;button.textContent='Working…';try{await work()}catch(e){const target=(button.id==='submitJobBtn'||button.id==='refreshBtn')?jobNotice:(button.id==='checkoutBtn'||button.classList.contains('plan-select'))?billingNotice:(button.id==='signupBtn'||button.id==='loginBtn'||button.id==='logoutBtn')?settingsAccountNotice:accountNotice;notice(target,e.message||'Something went wrong. Please try again.','error')}finally{button.disabled=false;button.textContent=old}}
 function credentials(){const email=$('email').value.trim(),password=$('password').value;if(!email||email.indexOf('@')<1)throw new Error('Enter a valid email address first.');if(password.length<10)throw new Error('Use a password of at least 10 characters.');return {email:email,password:password}}
 function setNavView(view){if(!$( 'view-'+view))view='overview';document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));document.querySelectorAll('.nav-link').forEach(el=>el.classList.toggle('active',el.dataset.view===view));const names={overview:'Overview',jobs:'Jobs & Reports',billing:'Billing & Plans',settings:'Settings'};$('crumbTitle').textContent=names[view]||'Overview';if(window.location.hash!=='#'+view)history.replaceState({},'',window.location.pathname+window.location.search+'#'+view);$('sidebar').classList.remove('open');$('navOverlay').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'})}
@@ -843,29 +1078,232 @@ document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('
 $('menuBtn').addEventListener('click',()=>{$('sidebar').classList.toggle('open');$('navOverlay').classList.toggle('open')});
 $('navOverlay').addEventListener('click',()=>{$('sidebar').classList.remove('open');$('navOverlay').classList.remove('open')});
 $('overviewStartJob').addEventListener('click',()=>setNavView('jobs'));$('heroJobBtn').addEventListener('click',()=>setNavView('jobs'));$('heroReportsBtn').addEventListener('click',()=>setNavView('jobs'));$('heroPlansBtn').addEventListener('click',()=>setNavView('billing'));
-function setSignedInUI(data){currentUser=data.user;currentProfile=data.profile||{};const email=(data.user&&data.user.email)||'Signed-in user';const tier=currentProfile.current_tier||'free';const label=({'free':'Free','tier_1_51':'Basic','tier_2_83':'Scale','tier_3_129':'Ultimate'})[tier]||tier;authControls.hidden=true;signedInPanel.hidden=false;signedInLabel.textContent=email;$('settingsAccountCaption').textContent='Current access: '+label;$('settingsAvatar').textContent=(email[0]||'A').toUpperCase();$('topAvatar').textContent=(email[0]||'A').toUpperCase();$('topUserName').textContent=email;$('topUserMeta').textContent='Access tier: '+label;$('metricTier').textContent=label;$('metricTierNote').textContent='Authenticated account';$('welcomeTitle').textContent='Your workspace is connected.';$('welcomeCopy').textContent='Account: '+email+'. You can submit a CSV job, view saved reports, and choose a plan from Billing & Plans.';$('sideEnvTitle').textContent='Sandbox environment';$('sideEnvCopy').textContent='PayPal Sandbox test orders only. Live billing has not been enabled.'}
+function setSignedInUI(data){currentUser=data.user;currentProfile=data.profile||{};const email=(data.user&&data.user.email)||'Signed-in user';const tier=currentProfile.current_tier||'free';const label=({'free':'Free','tier_1_51':'Basic','tier_2_83':'Scale','tier_3_129':'Ultimate'})[tier]||tier;authControls.hidden=true;signedInPanel.hidden=false;signedInLabel.textContent=email;$('settingsAccountCaption').textContent='Current access: '+label;$('settingsAvatar').textContent=(email[0]||'A').toUpperCase();$('topAvatar').textContent=(email[0]||'A').toUpperCase();$('topUserName').textContent=email;$('topUserMeta').textContent='Access tier: '+label;$('metricTier').textContent=label;$('metricTierNote').textContent='Authenticated account';$('welcomeTitle').textContent='Your workspace is connected.';$('welcomeCopy').textContent='Account: '+email+'. You can submit a CSV job, view saved reports, and choose a plan from Billing & Plans.';}
 function setSignedOutUI(){currentUser=null;currentProfile=null;authControls.hidden=false;signedInPanel.hidden=true;$('topAvatar').textContent='A';$('topUserName').textContent='Guest workspace';$('topUserMeta').textContent='Sign in to sync reports';$('metricTier').textContent='Guest';$('metricTierNote').textContent='Sign in to view your tier';$('welcomeTitle').textContent='Your workspace, ready.';$('welcomeCopy').textContent='Sign in to link jobs, billing, and reports to your account. A CSV output is created only when you submit a valid file.'}
 async function loadAccount(silent){try{const data=await api('/api/v1/auth/me');setSignedInUI(data);if(!silent)notice(accountNotice,'You are signed in. Choose a plan or run a CSV job.','good');if(settingsAccountNotice)notice(settingsAccountNotice,'Signed in as '+(data.user.email||data.user.id)+'.','good');return true}catch(e){setSignedOutUI();return false}}
 async function authenticate(mode){const body=credentials();const data=await api('/api/v1/auth/'+mode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(data.user){setNavView('overview');await loadAccount(true);await loadReports();notice(accountNotice,data.message||'Signed in successfully.','good')}else{notice(settingsAccountNotice,data.message||'Account created. Check your email to confirm it.','good')}}
 async function logout(){await api('/api/v1/auth/logout',{method:'POST'});setSignedOutUI();reportsCache=[];reportList.className='report-empty';reportList.textContent='Sign in to load your private report history.';reportResult.replaceChildren();notice(settingsAccountNotice,'You have signed out. Sign in again to access your private reports or checkout.','good')}
-async function checkout(){await configurePaymentMode();if(!paymentsEnabled)throw new Error('Checkout is disabled because payment or database readiness has not been verified. Please try again after the service is configured.');const signedIn=await loadAccount(true);if(!signedIn){setNavView('settings');throw new Error('Please sign in to AutoOps Hub first. The order will be linked to the account that is signed in.')}const data=await api('/api/v1/payments/paypal/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:$('tier').value})});if(!data.approval_url)throw new Error('PayPal did not return an approval link. Check the configured credentials and try again.');let approval;try{approval=new URL(data.approval_url)}catch(e){throw new Error('PayPal returned an invalid approval URL. No redirect was attempted.')}const allowedHosts=paymentMode==='live'?['www.paypal.com','paypal.com']:['www.sandbox.paypal.com','sandbox.paypal.com'];if(approval.protocol!=='https:'||!allowedHosts.includes(approval.hostname))throw new Error('PayPal returned an approval URL for the wrong payment environment. No redirect was attempted.');notice(billingNotice,(paymentMode==='live'?'Live':'Sandbox')+' order created for 
-async function captureReturned(){const orderId=new URLSearchParams(window.location.search).get('token');if(!orderId)throw new Error('No PayPal order token was found. Start checkout and return here after approving the Sandbox payment.');const data=await api('/api/v1/payments/paypal/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:orderId})});window.history.replaceState({},'',window.location.pathname+'#billing');notice(billingNotice,data.message||'Payment verification completed.','good');await loadAccount(true);await loadReports()}
-async function handleAuthCallback(){const hash=new URLSearchParams(window.location.hash.replace(/^#/,''));const query=new URLSearchParams(window.location.search);const accessToken=hash.get('access_token')||query.get('access_token');const authError=hash.get('error_description')||query.get('error_description')||hash.get('error')||query.get('error');if(authError)throw new Error('Email confirmation did not complete: '+authError.replace(/\+/g,' '));if(accessToken){const data=await api('/api/v1/auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:accessToken})});window.history.replaceState({},'',window.location.pathname+'#overview');notice(accountNotice,data.message||'Email confirmed. You are signed in.','good');await loadAccount(true);await loadReports();return true}if(query.get('auth')==='confirmed'){setNavView('settings');notice(settingsAccountNotice,'Email confirmation completed. Sign in below to continue.','good');window.history.replaceState({},'',window.location.pathname+'#settings');return true}return false}
+async function checkout(){
+  await configurePaymentMode();
+  if(!paymentsEnabled)throw new Error('Checkout is disabled because payment or database readiness has not been verified. Please try again after the service is configured.');
+  const signedIn=await loadAccount(true);
+  if(!signedIn){setNavView('settings');throw new Error('Please sign in to AutoOps Hub first. The order will be linked to the account that is signed in.')}
+  const data=await api('/api/v1/payments/paypal/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:$('tier').value})});
+  if(!data.approval_url)throw new Error('PayPal did not return an approval link. Check the configured credentials and try again.');
+  let approval;
+  try{approval=new URL(data.approval_url)}catch(e){throw new Error('PayPal returned an invalid approval URL. No redirect was attempted.')}
+  const allowedHosts=paymentMode==='live'?['www.paypal.com','paypal.com']:['www.sandbox.paypal.com','sandbox.paypal.com'];
+  if(approval.protocol!=='https:'||!allowedHosts.includes(approval.hostname))throw new Error('PayPal returned an approval URL for the wrong payment environment. No redirect was attempted.');
+  notice(billingNotice,(paymentMode==='live'?'Live':'Sandbox')+' order created. Redirecting to PayPal for approval.','good');
+  window.location.assign(approval.href);
+}
+async function captureReturned(){const orderId=new URLSearchParams(window.location.search).get('token');if(!orderId)throw new Error('No PayPal order token was found. Start checkout and return here after approving the PayPal order.');const data=await api('/api/v1/payments/paypal/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:orderId})});window.history.replaceState({},'',window.location.pathname+'#billing');notice(billingNotice,data.message||'Payment verification completed.','good');await loadAccount(true);await loadReports()}
+async function handleAuthCallback(){
+ const hash=new URLSearchParams(window.location.hash.replace(/^#/,'')),query=new URLSearchParams(window.location.search);
+ const accessToken=hash.get('access_token')||query.get('access_token');
+ const authError=hash.get('error_description')||query.get('error_description')||hash.get('error')||query.get('error');
+ const isRecovery=hash.get('type')==='recovery'||query.get('type')==='recovery'||query.get('auth')==='recovery';
+ if(authError)throw new Error('The authentication link could not be completed. Request a new link and try again.');
+ if(accessToken){
+   await api('/api/v1/auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:accessToken})});
+   if(isRecovery){
+     window.history.replaceState({},'',window.location.pathname+'?auth=recovery#settings');
+     setNavView('settings');$('signedInPanel').hidden=true;
+     $('email').parentElement.hidden=true;$('password').parentElement.hidden=true;
+     $('signupBtn').hidden=true;$('loginBtn').hidden=true;$('forgotPasswordBtn').hidden=true;
+     $('passwordRecoveryPanel').hidden=false;
+     notice(settingsAccountNotice,'Recovery link verified. Choose a new password below.','good');
+     return true;
+   }
+   window.history.replaceState({},'',window.location.pathname+'#overview');
+   notice(accountNotice,'Email confirmation completed. You are signed in.','good');
+   await loadAccount(true);await loadReports();return true;
+ }
+ if(query.get('auth')==='recovery'){
+   setNavView('settings');
+   try{
+     await api('/api/v1/auth/me');
+     $('signedInPanel').hidden=true;$('email').parentElement.hidden=true;$('password').parentElement.hidden=true;
+     $('signupBtn').hidden=true;$('loginBtn').hidden=true;$('forgotPasswordBtn').hidden=true;
+     $('passwordRecoveryPanel').hidden=false;
+     notice(settingsAccountNotice,'Your recovery session is still valid. Choose a new password below.','good');
+   }catch(e){
+     $('passwordRecoveryPanel').hidden=true;$('forgotPasswordBtn').hidden=false;
+     notice(settingsAccountNotice,'This reset link is expired or has not been verified. Request a new reset email and open the link from that email.','error');
+   }
+   return true;
+ }
+ if(query.get('auth')==='confirmed'){setNavView('settings');notice(settingsAccountNotice,'Email confirmation completed. Sign in below to continue.','good');window.history.replaceState({},'',window.location.pathname+'#settings');return true}
+ return false;
+}
 function downloadReport(name,value,format){const ext=(format||'csv').toLowerCase()==='json'?'json':'csv';const blob=new Blob([value],{type:ext==='json'?'application/json;charset=utf-8':'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(name||'autoops-report').replace(/[^a-z0-9_.-]/gi,'_')+'.'+ext;document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}
+
+function updateLatencyKpi(path,milliseconds){
+  const value=$('metricLatency'),note=$('metricLatencyNote');
+  if(value)value.textContent=Math.round(milliseconds)+' ms';
+  if(note)note.textContent='Browser-observed · '+String(path).split('?')[0].slice(0,38);
+}
+function appendTerminal(message,type){
+  const log=$('executionLog');if(!log)return;
+  const elapsed=lastExecutionStarted?Math.max(0,Math.round((performance.now()-lastExecutionStarted)/1000)):0;
+  const mm=String(Math.floor(elapsed/60)).padStart(2,'0'),ss=String(elapsed%60).padStart(2,'0');
+  const prefix=type==='error'?'[error]':type==='success'?'[success]':'[info]';
+  log.textContent+=String.fromCharCode(10)+'['+mm+':'+ss+'] '+prefix+' '+message;
+  log.scrollTop=log.scrollHeight;
+}
+function setExecutionStep(id,state){const item=$(id);if(!item)return;item.classList.remove('active','done');if(state)item.classList.add(state)}
+function prepareTerminal(file){
+  const log=$('executionLog'),state=$('terminalState');
+  if(log)log.textContent='[ready] '+file.name+' selected. Press Process file to start.';
+  if(state){state.textContent='Ready';state.className='terminal-state'}
+  setExecutionStep('stepUpload','active');setExecutionStep('stepProcess','');setExecutionStep('stepComplete','');
+}
+function startTerminal(file){
+  lastExecutionStarted=performance.now();
+  const log=$('executionLog'),state=$('terminalState');
+  if(log)log.textContent='';
+  if(state){state.textContent='Running';state.className='terminal-state running'}
+  setExecutionStep('stepUpload','active');setExecutionStep('stepProcess','');setExecutionStep('stepComplete','');
+  appendTerminal('Input selected: '+file.name+' ('+Math.max(1,Math.round(file.size/1024))+' KB).');
+  appendTerminal('Submitting to the existing authenticated processing route.');
+}
+function finishTerminal(data){
+  setExecutionStep('stepUpload','done');setExecutionStep('stepProcess','done');setExecutionStep('stepComplete','done');
+  appendTerminal('HTTP response received'+(lastApiLatencyMs===null?'':' in '+Math.round(lastApiLatencyMs)+' ms')+'.');
+  appendTerminal('Processing response: '+Number(data.rows_cleaned||0).toLocaleString()+' row(s)/entry(ies); format '+String(data.output_format||'unknown')+'.');
+  appendTerminal('Report ready for review and download.','success');
+  const state=$('terminalState');if(state){state.textContent='Success';state.className='terminal-state success'}
+}
+function failTerminal(error){
+  setExecutionStep('stepUpload','done');setExecutionStep('stepProcess','active');setExecutionStep('stepComplete','');
+  appendTerminal(error||'Request failed. Check the notice above for details.','error');
+  const state=$('terminalState');if(state){state.textContent='Failed';state.className='terminal-state failed'}
+}
+function parseCsvSample(text,maxRows){
+  const rows=[];let row=[],cell='',quoted=false;
+  const LF=String.fromCharCode(10),CR=String.fromCharCode(13);
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(ch==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++}else quoted=!quoted}
+    else if(ch===','&&!quoted){row.push(cell);cell=''}
+    else if((ch===LF||ch===CR)&&!quoted){if(ch===CR&&text[i+1]===LF)i++;row.push(cell);cell='';if(row.some(v=>String(v).length))rows.push(row);row=[];if(rows.length>=(maxRows||8))break}
+    else cell+=ch;
+  }
+  if(rows.length<(maxRows||8)&&(cell.length||row.length)){row.push(cell);if(row.some(v=>String(v).length))rows.push(row)}
+  return rows;
+}
+function normalizeHeaderForPreview(value){return String(value===null||value===undefined?'':value).trim().toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'_').replace(/_+/g,'_').replace(/^_+|_+$/g,'')}
+function makeEmptyPreview(message){const box=document.createElement('div');box.className='diff-empty';box.textContent=message;return box}
+function renderCsvPreview(target,text,kind){
+  target.replaceChildren();const rows=parseCsvSample(text,8);
+  if(!rows.length){target.append(makeEmptyPreview('No previewable rows were found.'));return}
+  const table=document.createElement('table');table.className='diff-table';
+  const head=document.createElement('thead'),headRow=document.createElement('tr');
+  rows[0].forEach(value=>{const th=document.createElement('th');th.textContent=value||'(blank header)';if(kind==='raw'&&(value!==String(value).trim()||normalizeHeaderForPreview(value)!==value))th.className='diff-bad';if(kind==='clean')th.className='diff-good';headRow.append(th)});
+  head.append(headRow);table.append(head);const body=document.createElement('tbody');
+  rows.slice(1).forEach(row=>{const tr=document.createElement('tr');for(let i=0;i<rows[0].length;i++){const value=row[i]===undefined?'':String(row[i]),td=document.createElement('td');td.textContent=value;if(kind==='raw'&&value!==value.trim())td.className='diff-bad';if(kind==='clean')td.className='diff-good';tr.append(td)}body.append(tr)});
+  table.append(body);target.append(table);
+}
+function renderTextPreview(target,text,kind,format){
+  target.replaceChildren();let content=String(text||'');
+  if(format==='json'){try{content=JSON.stringify(JSON.parse(content),null,2)}catch(e){}}
+  const pre=document.createElement('pre');pre.className='diff-pre';
+  content.slice(0,16000).split(String.fromCharCode(10)).slice(0,28).forEach(line=>{const span=document.createElement('span');if(kind==='raw'&&(/[\t ]+$/.test(line)))span.className='diff-line-bad';else if(kind==='clean')span.className='diff-line-good';span.textContent=line;pre.append(span,document.createTextNode(String.fromCharCode(10)))});target.append(pre);
+  if(content.length>16000){const note=document.createElement('div');note.className='support-meta';note.textContent='Preview shortened to protect browser responsiveness; the full server result is retained.';target.append(note)}
+}
+async function renderDiffInspector(file,result){
+  const rawBox=$('diffRaw'),cleanBox=$('diffClean'),state=$('diffState');if(!rawBox||!cleanBox)return;
+  if(file){
+    if(state){state.textContent=result?'Output available':'Input selected';state.className='enterprise-tag'+(result?'':' muted')}
+    const extension=(file.name.split('.').pop()||'').toLowerCase();
+    if(['xlsx','xls'].includes(extension))rawBox.replaceChildren(makeEmptyPreview('Workbook selected ('+file.name+'). Binary Excel preview is not parsed in the browser; the existing server-side workbook processor remains unchanged.'));
+    else try{
+      if(lastRawPreviewFile!==file){lastRawPreviewText=await file.text();lastRawPreviewFile=file}
+      const raw=String(lastRawPreviewText||'').slice(0,120000);
+      if(extension==='csv')renderCsvPreview(rawBox,raw,'raw');else renderTextPreview(rawBox,raw,'raw',extension==='json'?'json':'text');
+      if(raw.length<(lastRawPreviewText||'').length){const note=document.createElement('div');note.className='support-meta';note.textContent='Raw preview truncated to 120 KB.';rawBox.append(note)}
+    }catch(e){rawBox.replaceChildren(makeEmptyPreview('The browser could not preview this input. Server processing is unchanged.'))}
+  }
+  if(result&&typeof result.formatted_result==='string'){
+    const format=String(result.output_format||'csv').toLowerCase();
+    if(format==='csv')renderCsvPreview(cleanBox,result.formatted_result,'clean');else renderTextPreview(cleanBox,result.formatted_result,'clean',format==='json'?'json':'text');
+    const foot=$('diffFootnote');if(foot)foot.textContent='Preview shows at most 8 rows or 28 lines. Full output remains available from the download control below.';
+  }else if(!result)cleanBox.replaceChildren(makeEmptyPreview('Cleaned output appears after the processing request succeeds.'));
+  else cleanBox.replaceChildren(makeEmptyPreview('This result did not include a text preview. Open the report details below.'));
+}
 function showResult(title,value){reportResult.replaceChildren();const heading=document.createElement('h3');heading.textContent=title;heading.style.margin='16px 0 7px';reportResult.append(heading);let printable=value,download=null,format='csv';if(value&&typeof value==='object'){format=value.output_format||'csv';if(value.formatted_result){download=value.formatted_result;printable=JSON.stringify(value.summary||{rows_cleaned:value.rows_cleaned},null,2)+'\n\n'+value.formatted_result}else printable=JSON.stringify(value,null,2)}const pre=document.createElement('pre');pre.className='result-box';pre.textContent=typeof printable==='string'?printable:JSON.stringify(printable,null,2);reportResult.append(pre);if(download!==null){const button=document.createElement('button');button.className='btn secondary small';button.textContent='Download '+(format==='json'?'JSON result':'cleaned CSV');button.style.marginTop='10px';button.addEventListener('click',()=>downloadReport(title,download,format));reportResult.append(button)}}
-async function submitJob(){const file=$('csv').files&&$('csv').files[0];if(!file)throw new Error('Choose a supported file before submitting the job.');const form=new FormData();form.append('file',file);form.append('operation',$('operation').value);const data=await api('/api/v1/automation/process-file',{method:'POST',body:form});notice(jobNotice,'Job completed. '+data.rows_cleaned+' row(s)/entry(ies) processed. Saved report ID: '+(data.job_id||'pending'),'good');showResult('Latest '+data.job_type.replace(/_/g,' ')+' report',data);await loadReports()}
-async function loadReports(){if(!currentUser){reportList.className='report-empty';reportList.textContent='Sign in to load your private report history.';$('metricJobs').textContent='—';$('metricLatest').textContent='—';$('metricLatestNote').textContent='Sign in to view your reports';$('activityLabel').textContent='Awaiting account sign-in';$('activityBar').style.width='0%';return}try{const data=await api('/api/v1/jobs');const jobs=data.jobs||[];reportsCache=jobs;$('metricJobs').textContent=String(jobs.length);$('activityLabel').textContent=jobs.length?jobs.length+' saved report'+(jobs.length===1?'':'s'):'Awaiting first report';$('activityBar').style.width=Math.min(100,jobs.length*10)+'%';if(jobs.length){$('metricLatest').textContent=(jobs[0].job_type||'CSV job').replace(/_/g,' ');$('metricLatestNote').textContent=jobs[0].created_at?new Date(jobs[0].created_at).toLocaleDateString():'Latest saved job'}else{$('metricLatest').textContent='—';$('metricLatestNote').textContent='No job completed yet'}reportList.replaceChildren();if(!jobs.length){reportList.className='report-empty';reportList.textContent='No reports yet. Upload a CSV to create the first saved result.';return}reportList.className='report-list';jobs.forEach(job=>{const row=document.createElement('article');row.className='report-row';const head=document.createElement('div');head.className='report-row-head';const title=document.createElement('strong');title.textContent=(job.job_type||'Automation job').replace(/_/g,' ');const state=document.createElement('span');state.className='tag';state.textContent=job.status||'unknown';head.append(title,state);const meta=document.createElement('small');meta.textContent='Created: '+(job.created_at||'time unavailable')+' · Report ID: '+job.id;const view=document.createElement('button');view.className='btn secondary small';view.textContent='Open report';view.addEventListener('click',()=>busy(view,async()=>{const full=await api('/api/v1/jobs/'+encodeURIComponent(job.id));showResult('Report '+job.id,full.job.result);notice(jobNotice,'Saved report loaded.','good')}));row.append(head,meta,view);reportList.append(row)});if($('autoOpenLatest').checked&&jobs.length){const latest=await api('/api/v1/jobs/'+encodeURIComponent(jobs[0].id));showResult('Latest saved report',latest.job.result)}}catch(e){reportList.className='report-empty';reportList.textContent='Unable to load reports. '+e.message}}
+async function submitJob(){
+ const file=$('csv').files&&$('csv').files[0];if(!file)throw new Error('Choose a supported file before submitting the job.');
+ startTerminal(file);setExecutionStep('stepUpload','active');appendTerminal('Upload request started. The server returns the completed result in one response.');
+ try{
+  const form=new FormData();form.append('file',file);form.append('operation',$('operation').value);
+  setExecutionStep('stepUpload','done');setExecutionStep('stepProcess','active');
+  appendTerminal('Waiting for the existing server processing route; no processing algorithm was changed.');
+  const data=await api('/api/v1/automation/process-file',{method:'POST',body:form});
+  finishTerminal(data);notice(jobNotice,'Job completed. '+data.rows_cleaned+' row(s)/entry(ies) processed. Saved report ID: '+(data.job_id||'pending'),'good');
+  await renderDiffInspector(file,data);showResult('Latest '+data.job_type.replace(/_/g,' ')+' report',data);await loadReports();
+ }catch(e){failTerminal(e.message);throw e}
+}
+async function loadHistoricalKpis(jobs){
+ const metricRows=$('metricRows'),metricHours=$('metricHours'),rowsNote=$('metricRowsNote'),hoursNote=$('metricHoursNote');
+ if(!currentUser||!jobs.length){if(metricRows)metricRows.textContent='0';if(metricHours)metricHours.textContent='0.00 h';if(rowsNote)rowsNote.textContent=currentUser?'No completed reports yet':'Sign in to summarize recent reports';if(hoursNote)hoursNote.textContent='Estimate only; no work history yet';return}
+ let totalRows=0,readCount=0;
+ for(let i=0;i<jobs.length;i+=4){
+  const batch=await Promise.allSettled(jobs.slice(i,i+4).map(job=>api('/api/v1/jobs/'+encodeURIComponent(job.id))));
+  batch.forEach(item=>{if(item.status!=='fulfilled')return;const job=item.value&&item.value.job,result=job&&job.result;if(!result||typeof result!=='object')return;
+   const candidate=result.rows_cleaned!==undefined?result.rows_cleaned:(result.summary&&result.summary.rows_output!==undefined?result.summary.rows_output:(result.summary&&result.summary.rows_received!==undefined?result.summary.rows_received:0));
+   const count=Number(candidate);if(Number.isFinite(count)&&count>=0){totalRows+=count;readCount++}
+  });
+ }
+ if(metricRows)metricRows.textContent=totalRows.toLocaleString();
+ if(rowsNote)rowsNote.textContent=readCount+' of '+jobs.length+' recent reports summarized';
+ if(metricHours)metricHours.textContent=(totalRows*2/1000/60).toFixed(2)+' h';
+ if(hoursNote)hoursNote.textContent='Estimate: 2 minutes per 1,000 rows';
+}
+async function loadReports(){
+ if(!currentUser){reportList.className='report-empty';reportList.textContent='Sign in to load your private report history.';$('metricJobs').textContent='—';$('metricLatest').textContent='—';$('metricLatestNote').textContent='Sign in to view your reports';$('activityLabel').textContent='Awaiting account sign-in';$('activityBar').style.width='0%';if($('metricRows'))$('metricRows').textContent='—';if($('metricHours'))$('metricHours').textContent='—';if($('metricRowsNote'))$('metricRowsNote').textContent='Sign in to summarize recent reports';if($('metricHoursNote'))$('metricHoursNote').textContent='Estimate, not a measured result';return}
+ try{
+  const data=await api('/api/v1/jobs'),jobs=data.jobs||[];reportsCache=jobs;$('metricJobs').textContent=String(jobs.length);
+  const jobNote=document.querySelector('#metricJobs')?.parentElement?.querySelector('.metric-note');if(jobNote)jobNote.textContent=jobs.length>=25?'Most recent 25 reports':'Saved reports in your account';
+  $('activityLabel').textContent=jobs.length?jobs.length+' saved report'+(jobs.length===1?'':'s'):'Awaiting first report';$('activityBar').style.width=Math.min(100,jobs.length*10)+'%';
+  if(jobs.length){$('metricLatest').textContent=(jobs[0].job_type||'Automation job').replace(/_/g,' ');$('metricLatestNote').textContent=jobs[0].created_at?new Date(jobs[0].created_at).toLocaleDateString():'Latest saved job'}else{$('metricLatest').textContent='—';$('metricLatestNote').textContent='No job completed yet'}
+  reportList.replaceChildren();
+  if(!jobs.length){reportList.className='report-empty';reportList.textContent='No reports yet. Upload a supported file to create the first saved result.';await loadHistoricalKpis(jobs);return}
+  reportList.className='report-list';jobs.forEach(job=>{const row=document.createElement('article');row.className='report-row';const head=document.createElement('div');head.className='report-row-head';const title=document.createElement('strong');title.textContent=(job.job_type||'Automation job').replace(/_/g,' ');const state=document.createElement('span');state.className='tag';state.textContent=job.status||'unknown';head.append(title,state);const meta=document.createElement('small');meta.textContent='Created: '+(job.created_at||'time unavailable')+' · Report ID: '+job.id;const view=document.createElement('button');view.className='btn secondary small';view.textContent='Open report';view.addEventListener('click',()=>busy(view,async()=>{const full=await api('/api/v1/jobs/'+encodeURIComponent(job.id));showResult('Report '+job.id,full.job.result);notice(jobNotice,'Saved report loaded.','good')}));row.append(head,meta,view);reportList.append(row)});
+  loadHistoricalKpis(jobs).catch(()=>{if($('metricRowsNote'))$('metricRowsNote').textContent='Some historical report totals could not be loaded'});
+  if($('autoOpenLatest').checked&&jobs.length){const latest=await api('/api/v1/jobs/'+encodeURIComponent(jobs[0].id));showResult('Latest saved report',latest.job.result)}
+ }catch(e){reportList.className='report-empty';reportList.textContent='Unable to load reports. '+e.message}
+}
 function applyPreferences(){document.body.classList.toggle('compact',$('compactMode').checked);try{localStorage.setItem('autoops_compact',String($('compactMode').checked));localStorage.setItem('autoops_auto_latest',String($('autoOpenLatest').checked))}catch(e){}}
 try{$('compactMode').checked=localStorage.getItem('autoops_compact')==='true';$('autoOpenLatest').checked=localStorage.getItem('autoops_auto_latest')==='true'}catch(e){}
 $('compactMode').addEventListener('change',applyPreferences);$('autoOpenLatest').addEventListener('change',()=>{applyPreferences();if(currentUser)loadReports()});
 $('signupBtn').addEventListener('click',()=>busy($('signupBtn'),()=>authenticate('signup')));
 $('loginBtn').addEventListener('click',()=>busy($('loginBtn'),()=>authenticate('login')));
+$('forgotPasswordBtn').addEventListener('click',()=>busy($('forgotPasswordBtn'),async()=>{
+ const email=$('email').value.trim();
+ if(!email||email.indexOf('@')<1)throw new Error('Enter the email address for your account first.');
+ const data=await api('/api/v1/auth/recover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+ notice(settingsAccountNotice,data.message||'If an account exists for that email, a reset link will arrive shortly.','good');
+}));
+$('updatePasswordBtn').addEventListener('click',()=>busy($('updatePasswordBtn'),async()=>{
+ const password=$('recoveryPassword').value,confirm=$('recoveryPasswordConfirm').value;
+ if(password.length<10||password.length>256)throw new Error('Use a password between 10 and 256 characters.');
+ if(password!==confirm)throw new Error('The new passwords do not match.');
+ const data=await api('/api/v1/auth/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+ $('passwordRecoveryPanel').hidden=true;$('forgotPasswordBtn').hidden=false;$('authControls').hidden=false;
+ $('email').parentElement.hidden=false;$('password').parentElement.hidden=false;
+ $('signupBtn').hidden=false;$('loginBtn').hidden=false;
+ setSignedOutUI();$('recoveryPassword').value='';$('recoveryPasswordConfirm').value='';
+ notice(settingsAccountNotice,data.message||'Password updated. Sign in again.','good');
+}));
+
 $('logoutBtn').addEventListener('click',()=>busy($('logoutBtn'),logout));
 $('checkoutBtn').addEventListener('click',()=>busy($('checkoutBtn'),checkout));
 $('submitJobBtn').addEventListener('click',()=>busy($('submitJobBtn'),submitJob));
+$('csv').addEventListener('change',()=>{const file=$('csv').files&&$('csv').files[0];if(!file)return;lastRawPreviewFile=null;lastRawPreviewText=null;renderDiffInspector(file,null);prepareTerminal(file)});
 $('refreshBtn').addEventListener('click',()=>busy($('refreshBtn'),loadReports));
-document.querySelectorAll('.plan-select').forEach(button=>button.addEventListener('click',()=>{$('tier').value=button.dataset.tier;document.querySelectorAll('.price-card').forEach(card=>card.classList.toggle('selected-plan',card.dataset.priceTier===button.dataset.tier));document.querySelectorAll('.plan-select').forEach(b=>{b.textContent='Select '+({'tier_1_51':'Basic','tier_2_83':'Scale','tier_3_129':'Ultimate'})[b.dataset.tier];});button.textContent='Selected';notice(billingNotice,$('tier').selectedOptions[0].text+' selected. Continue to '+(paymentMode==='live'?'PayPal':'PayPal Sandbox')+' to create an order.','good');$('checkoutBtn').scrollIntoView({behavior:'smooth',block:'center'})}));
-(async()=>{applyPreferences();setNavView((window.location.hash||'#overview').slice(1));try{if(await handleAuthCallback())return;const query=new URLSearchParams(window.location.search);if(query.get('payment')==='success'&&query.get('token')){setNavView('billing');await captureReturned();return}if(query.get('payment')==='cancelled'){setNavView('billing');notice(billingNotice,'PayPal checkout was cancelled. No payment was captured. You can choose a plan and try again.','error');window.history.replaceState({},'',window.location.pathname+'#billing')}const signed=await loadAccount(true);if(signed)await loadReports();else await loadReports()}catch(e){notice(accountNotice,e.message,'error')}})();
+document.querySelectorAll('.plan-select').forEach(button=>button.addEventListener('click',()=>{$('tier').value=button.dataset.tier;document.querySelectorAll('.price-card').forEach(card=>card.classList.toggle('selected-plan',card.dataset.priceTier===button.dataset.tier));document.querySelectorAll('.plan-select').forEach(b=>{b.textContent='Select '+({'tier_1_51':'Basic','tier_2_83':'Scale','tier_3_129':'Ultimate'})[b.dataset.tier];});button.textContent='Selected';notice(billingNotice,$('tier').selectedOptions[0].text+' selected. Continue to PayPal to create a one-time order.','good');$('checkoutBtn').scrollIntoView({behavior:'smooth',block:'center'})}));
+(async()=>{applyPreferences();setNavView((window.location.hash||'#overview').slice(1));try{await configurePaymentMode();if(await handleAuthCallback())return;const query=new URLSearchParams(window.location.search);if(query.get('payment')==='success'&&query.get('token')){setNavView('billing');await captureReturned();return}if(query.get('payment')==='cancelled'){setNavView('billing');notice(billingNotice,'PayPal checkout was cancelled. No payment was captured. You can choose a plan and try again.','error');window.history.replaceState({},'',window.location.pathname+'#billing')}const signed=await loadAccount(true);if(signed)await loadReports();else await loadReports()}catch(e){notice(accountNotice,e.message,'error')}})();
 })();
 </script>
 </body>
@@ -909,6 +1347,59 @@ async def auth_session(payload: Dict[str, Any], response: Response):
         logger.exception("Supabase confirmation session exchange failed.")
         raise HTTPException(status_code=503, detail="Could not complete email confirmation. Please sign in again.")
 
+@app.post("/api/v1/auth/recover")
+async def auth_recover(payload: Dict[str, Any]):
+    """Send a password-reset link without revealing whether an email is registered."""
+    email = str(payload.get("email", "")).strip().lower()
+    if "@" not in email or len(email) > 320:
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+    public_app_url = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+    if not public_app_url.startswith("https://"):
+        raise HTTPException(status_code=503, detail="Password recovery is temporarily unavailable.")
+    redirect_to = f"{public_app_url}/?auth=recovery"
+    try:
+        await _supabase_auth_call("recover?redirect_to=" + quote(redirect_to, safe=""), {"email": email})
+    except HTTPException as exc:
+        # Auth errors for unknown/disabled addresses must not reveal account existence.
+        if exc.status_code >= 500:
+            raise HTTPException(status_code=503, detail="Password recovery is temporarily unavailable.")
+        logger.info("Password recovery requested; Auth did not accept the request.")
+    return {"success": True, "message": "If an account exists for that email, a password-reset link will arrive shortly."}
+
+@app.post("/api/v1/auth/password")
+async def auth_update_password(payload: Dict[str, Any], request: Request, response: Response):
+    """Change the password only for the account represented by a valid Supabase session."""
+    user = await get_authenticated_user(request)
+    password = str(payload.get("password", ""))
+    if len(password) < 10 or len(password) > 256:
+        raise HTTPException(status_code=400, detail="Use a password between 10 and 256 characters.")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            updated = await client.put(
+                f"{SUPABASE_URL.rstrip('/')}/auth/v1/user",
+                headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {user['token']}", "Content-Type": "application/json"},
+                json={"password": password},
+            )
+        if updated.status_code >= 400:
+            logger.warning("Supabase rejected a password update for a validated session (HTTP %s).", updated.status_code)
+            raise HTTPException(status_code=400, detail="The reset link may have expired. Request a new password-reset email and try again.")
+        # Do not leave the recovery session active after the password changes.
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(8.0)) as client:
+                await client.post(
+                    f"{SUPABASE_URL.rstrip('/')}/auth/v1/logout",
+                    headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {user['token']}"},
+                )
+        except Exception:
+            logger.warning("Password changed; remote sign-out of recovery session could not be confirmed.")
+        response.delete_cookie("autoops_session", path="/", secure=True, httponly=True, samesite="lax")
+        return {"success": True, "message": "Password updated. Sign in again using your new password.", "user_id": user["user_id"]}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Supabase password update failed.")
+        raise HTTPException(status_code=503, detail="Password update is temporarily unavailable.")
+
 @app.post("/api/v1/auth/login")
 async def auth_login(payload: Dict[str, Any], response: Response):
     email = str(payload.get("email", "")).strip().lower()
@@ -951,6 +1442,24 @@ async def _paypal_access_token() -> str:
         logger.exception("PayPal OAuth failed.")
         raise HTTPException(status_code=503, detail="PayPal authentication failed; verify the credentials belong to the selected environment and REST app.")
 
+@app.get("/api/v1/payments/paypal/public-config")
+async def paypal_public_config(response: Response):
+    """Return only browser-safe PayPal configuration for eligible checkout buttons."""
+    response.headers["Cache-Control"] = "no-store"
+    mode = _paypal_mode()
+    enabled = (
+        _paypal_credentials_configured()
+        and mode != "invalid"
+        and (mode != "live" or PAYPAL_LIVE_ENABLED)
+        and _credential_is_configured(PAYPAL_CLIENT_ID)
+    )
+    if not enabled:
+        return {"enabled": False, "mode": mode, "currency": "USD"}
+    # A PayPal client ID is designed to be public in the JavaScript SDK;
+    # the client secret and webhook ID are never returned.
+    return {"enabled": True, "mode": mode, "currency": "USD", "client_id": PAYPAL_CLIENT_ID}
+
+
 @app.post("/api/v1/payments/paypal/order")
 async def create_paypal_order(request: Request, payload: Dict[str, Any]):
     user = await get_authenticated_user(request)
@@ -965,7 +1474,7 @@ async def create_paypal_order(request: Request, payload: Dict[str, Any]):
         raise HTTPException(status_code=409, detail="Account profile/usage ledger is missing; cannot create a checkout.")
     amount, label = TIERS[tier]
     token = await _paypal_access_token()
-    base_url = os.getenv("PUBLIC_APP_URL", "https://autoops-hub-staging.onrender.com").rstrip("/")
+    base_url = _public_app_url()
     payload = {
         "intent": "CAPTURE",
         "purchase_units": [{
@@ -1024,8 +1533,9 @@ async def capture_paypal_order(request: Request, payload: Dict[str, Any]):
                 headers={"Authorization": f"Bearer {token}"})
             check.raise_for_status()
             order = check.json()
-            if order.get("status") != "APPROVED":
-                raise HTTPException(status_code=409, detail="PayPal order is not approved yet.")
+            order_status = order.get("status")
+            if order_status not in {"APPROVED", "COMPLETED"}:
+                raise HTTPException(status_code=409, detail="PayPal order is not approved or already completed.")
             units = order.get("purchase_units") or []
             if len(units) != 1:
                 raise HTTPException(status_code=400, detail="Unexpected PayPal purchase-unit count.")
@@ -1033,12 +1543,20 @@ async def capture_paypal_order(request: Request, payload: Dict[str, Any]):
             amt = unit.get("amount") or {}
             if unit.get("custom_id") != user["user_id"] or unit.get("reference_id") != saved["tier"]:
                 raise HTTPException(status_code=400, detail="PayPal order ownership/tier mismatch.")
+            if saved.get("tier") not in TIERS or float(saved.get("amount", 0)) != float(TIERS[saved["tier"]][0]):
+                raise HTTPException(status_code=409, detail="Server-recorded checkout tier and amount do not match.")
             if amt.get("currency_code") != "USD" or amt.get("value") != f'{float(saved["amount"]):.2f}':
                 raise HTTPException(status_code=400, detail="PayPal order amount does not match the recorded plan.")
-            captured = await client.post(f"{PAYPAL_API_BASE}/v2/checkout/orders/{order_id}/capture",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json={})
-            captured.raise_for_status()
-            capture_data = captured.json()
+            if order_status == "APPROVED":
+                request_id = "ao-cap-" + hashlib.sha256(order_id.encode("utf-8")).hexdigest()[:24]
+                captured = await client.post(f"{PAYPAL_API_BASE}/v2/checkout/orders/{order_id}/capture",
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                             "PayPal-Request-Id": request_id}, json={})
+                captured.raise_for_status()
+                capture_data = captured.json()
+            else:
+                # Recover a previously completed PayPal capture if the first HTTP response was lost.
+                capture_data = order
         if capture_data.get("status") != "COMPLETED":
             raise HTTPException(status_code=409, detail="PayPal has not completed the capture.")
         captures = (((capture_data.get("purchase_units") or [{}])[0].get("payments") or {}).get("captures") or [])
@@ -1055,12 +1573,26 @@ async def capture_paypal_order(request: Request, payload: Dict[str, Any]):
         supabase.table("paypal_orders").update({
             "status": "captured", "capture_id": cap["id"], "captured_at": datetime.now(timezone.utc).isoformat()
         }).eq("paypal_order_id", order_id).execute()
-        return {"success": True, "message": "Sandbox payment captured and account tier updated.", "tier": saved["tier"], "capture_id": cap["id"], "database_result": applied.data}
+        return {"success": True, "message": f"{_paypal_mode().title()} payment captured and account tier updated.", "tier": saved["tier"], "capture_id": cap["id"], "transaction_id": cap["id"], "database_result": applied.data}
     except HTTPException:
         raise
     except Exception:
         logger.exception("PayPal order capture/application failed.")
         raise HTTPException(status_code=503, detail="PayPal capture could not be applied safely. Retry after checking logs.")
+
+@app.get("/api/v1/payments/history")
+async def list_customer_payment_history(request: Request):
+    """Return only the authenticated customer's verified one-time payment records."""
+    user = await get_authenticated_user(request)
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database is not connected.")
+    rows = supabase.table("transactions").select(
+        "transaction_id,payment_gateway,gateway_transaction_id,amount_paid,timestamp"
+    ).eq("profile_id", user["user_id"]).eq("payment_gateway", "paypal").order(
+        "timestamp", desc=True
+    ).limit(25).execute()
+    return {"transactions": rows.data or []}
+
 
 @app.get("/api/v1/jobs")
 async def list_customer_jobs(request: Request):
