@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en-KE"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="See how to clean a small-shop stock CSV in Kenya: normalize column names, trim extra spaces, download a sample, and review output with AutoOps Hub.">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<link rel="canonical" href="https://autoops-hub-public.onrender.com/kenya-csv-stock-cleanup.html">
+<meta property="og:type" content="article"><meta property="og:site_name" content="AutoOps Hub">
+<meta property="og:title" content="How to Clean a Stock CSV for a Kenyan Small Business">
+<meta property="og:description" content="A worked example using fictional stock data, a sample CSV download, and a safe file-review checklist.">
+<meta property="og:url" content="https://autoops-hub-public.onrender.com/kenya-csv-stock-cleanup.html"><meta property="og:locale" content="en_KE">
+<meta name="twitter:card" content="summary"><meta name="twitter:title" content="Clean a Stock CSV for a Kenyan Small Business">
+<meta name="twitter:description" content="See a fictional stock-list example and try the free CSV allowance with up to 100 data rows per job.">
+<title>How to Clean a Stock CSV for a Kenyan Small Business | AutoOps Hub</title>
+<style>
+:root{color-scheme:dark;--bg:#080e18;--panel:#101b2b;--line:#263951;--text:#edf3fc;--muted:#a6b4c8;--blue:#a9caff;--teal:#75e0cc}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 70% -10%,#203958 0,transparent 40%),var(--bg);color:var(--text);font:16px/1.75 system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:var(--blue)}.wrap{max-width:880px;margin:auto;padding:0 22px}.nav,footer{display:flex;gap:18px;justify-content:space-between;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:22px 0}.hero{padding:44px 0 24px}.eyebrow{color:var(--teal);text-transform:uppercase;letter-spacing:.14em;font-size:12px;font-weight:800}.hero h1{font-size:clamp(34px,6vw,54px);line-height:1.12;letter-spacing:-.04em;margin:12px 0}.muted{color:var(--muted)}h2{margin-top:38px;line-height:1.25}.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:18px;margin:18px 0}.btn{display:inline-block;background:linear-gradient(105deg,#a9caff,#75e0cc);color:#091624;text-decoration:none;font-weight:800;padding:12px 16px;border-radius:10px;margin:10px 8px 10px 0}.btn.secondary{background:#15243a;border:1px solid #314663;color:var(--text)}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#050a11;border:1px solid var(--line);padding:15px;border-radius:10px;color:#e3f1ff;font-size:14px}.note{border-left:3px solid var(--teal);padding:10px 14px;background:#0f1c29}.faq{padding:14px 0;border-bottom:1px solid var(--line)}footer{margin-top:44px;border-top:1px solid var(--line);border-bottom:0;color:var(--muted);font-size:13px}
+</style>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"How to Clean a Stock CSV for a Kenyan Small Business","url":"https://autoops-hub-public.onrender.com/kenya-csv-stock-cleanup.html","isPartOf":{"@type":"WebSite","name":"AutoOps Hub","url":"https://autoops-hub-public.onrender.com/"},"description":"A practical sample-driven guide to cleaning a small-shop inventory CSV."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What does the free CSV workflow change?","acceptedAnswer":{"@type":"Answer","text":"It normalizes CSV column headings to lowercase with underscores and trims surrounding spaces from values. It does not validate stock counts, calculate totals, or reconcile records."}},{"@type":"Question","name":"How many rows can I test for free?","acceptedAnswer":{"@type":"Answer","text":"The current free tier allows up to two jobs and up to 100 data rows per CSV job."}},{"@type":"Question","name":"Can I upload real customer or payment information?","acceptedAnswer":{"@type":"Answer","text":"Use fictional or non-sensitive sample data for a first test. Remove personal details, passwords, payment references, and confidential information unless authorized to process it."}}]}</script>
+</head><body><div class="wrap">
+<nav class="nav"><a href="./">← AutoOps Hub home</a><a href="https://github.com/imaraonecbo/autoops-hub/tree/production-paypal-live-20261028">Review project code ↗</a></nav>
+<main>
+<header class="hero"><div class="eyebrow">A practical Kenya-first example</div>
+<h1>How to clean a stock CSV for a Kenyan small business</h1>
+<p class="muted">A shop, distributor, or small team might receive a stock list from a till, supplier, marketplace, or spreadsheet. Before importing it elsewhere, make the column headings and surrounding spaces consistent. This walkthrough uses invented data and shows what basic AutoOps Hub CSV cleanup does.</p>
+<a class="btn" href="https://autoops-hub-production.onrender.com/?utm_source=organic_guide&amp;utm_medium=website&amp;utm_campaign=kenya_csv_cleanup&amp;utm_content=stock_guide">Try the free CSV allowance ↗</a>
+<a class="btn secondary" href="examples/kenya-small-shop-stock.csv" download>Download sample CSV</a></header>
+<section><h2>1. Start with a safe sample</h2><p>Download the fictional stock list or create a copy of your own file. Keep the original untouched so you can compare results. The sample has invented product codes, prices, quantities, and counties; it contains no customer information.</p>
+<div class="card"><h3>Before cleanup</h3><pre> Product SKU , Product Name , Stock Qty , Unit Price KES , County
+ KS-001 , Maize Flour 2kg , 12 , 230 , Nairobi
+ KS-002 , Rice 1kg , 8 , 175 , Machakos
+ KS-003 , Soap Bar , 24 , 95 , Makueni</pre><p class="muted">Notice the spaces around the headings and values.</p></div></section>
+<section><h2>2. Run the CSV cleanup</h2><p>Open AutoOps Hub, create or sign in to your account, choose the sample CSV, and run the CSV cleanup workflow. The free allowance supports up to two jobs, with up to 100 data rows per CSV. No custom domain is required.</p><p>Basic cleanup trims headings, uses lowercase, replaces spaces in headings with underscores, and trims whitespace around cell values. It does not decide whether stock counts or prices are correct.</p>
+<div class="card"><h3>After header and whitespace cleanup</h3><pre>product_sku,product_name,stock_qty,unit_price_kes,county
+KS-001,Maize Flour 2kg,12,230,Nairobi
+KS-002,Rice 1kg,8,175,Machakos
+KS-003,Soap Bar,24,95,Makueni</pre><p class="muted">This is the expected shape for the fictional example, not a claim that anyone's business file has already been processed.</p></div></section>
+<section><h2>3. Review before using the file</h2><ul><li>Confirm the output headings match what your next tool expects.</li><li>Compare several rows with the original file.</li><li>Check stock counts, prices, formulas, and totals separately; this tool does not reconcile inventory or calculate accounting totals.</li><li>Keep an original copy for comparison.</li></ul>
+<div class="note"><strong>Privacy reminder:</strong> don't upload passwords, M-Pesa or bank details, private server logs, personal customer records, or confidential information unless you have authority and a legitimate reason to process it. A sample file is safest for a first test.</div></section>
+<section><h2>When is this useful?</h2><p>This first-pass workflow may help when CSV headings use mixed capitalization or spacing, values contain accidental spaces, or a small file needs a repeatable formatting pass before a manual check. For larger jobs or other formats, check plan eligibility in the live app.</p>
+<div class="card"><h3>Try it without buying a domain</h3><p>The public guide and app are reachable on their existing Render URLs from Kenya or elsewhere. Start with the sample and decide whether the limited free allowance is useful.</p><a class="btn" href="https://autoops-hub-production.onrender.com/?utm_source=organic_guide&amp;utm_medium=website&amp;utm_campaign=kenya_csv_cleanup&amp;utm_content=bottom_cta">Open AutoOps Hub ↗</a> <a href="https://github.com/imaraonecbo/autoops-hub/tree/production-paypal-live-20261028">Inspect code on GitHub ↗</a></div></section>
+<section><h2>Common questions</h2>
+<div class="faq"><h3>Does this guarantee spreadsheet accuracy?</h3><p>No. It formats headers and trims spaces. Validate values, stock counts, and totals separately.</p></div>
+<div class="faq"><h3>Does Free remove duplicate or blank rows?</h3><p>No. The free CSV path does not remove duplicate or blank rows. That cleanup is available only on higher plan tiers in the current application logic.</p></div>
+<div class="faq"><h3>Do I need a custom domain?</h3><p>No. Use the existing AutoOps Hub Render URL; no domain purchase or DNS change is needed.</p></div>
+</section>
+</main><footer><span>AutoOps Hub · Kenya and beyond</span><span><a href="./">Home</a> · <a href="https://github.com/imaraonecbo/autoops-hub">GitHub repository</a></span></footer>
+</div></body></html>
