@@ -1045,10 +1045,15 @@ const authControls=$('authControls'),signedInPanel=$('signedInPanel'),signedInLa
 let currentUser=null,currentProfile=null,reportsCache=[],paymentMode='unknown',paymentsEnabled=false,lastApiLatencyMs=null,lastExecutionStarted=0,lastRawPreviewFile=null,lastRawPreviewText=null,paypalFundingInitializationAttempted=false;
 async function configurePaymentMode(){
   try{
-    const health=await api('/api/v1/health');
-    paymentMode=health.payment_mode||'sandbox';
-    paymentsEnabled=health.paypal_checkout_enabled===true;
-    const environmentLabel=paymentMode==='live'?'Live':paymentMode==='sandbox'?'Sandbox':'Invalid';
+    let health=null;
+    for(let attempt=0;attempt<3;attempt++){
+      try{health=await api('/api/v1/health');break}
+      catch(error){if(attempt===2)throw error;await new Promise(resolve=>setTimeout(resolve,1200*(attempt+1)))}
+    }
+    if(!health)throw new Error('Payment readiness could not be confirmed.');
+    paymentMode=health.payment_mode||'unknown';
+    paymentsEnabled=health.status==='ok'&&health.database_configured===true&&health.database_reachable===true&&health.paypal_checkout_enabled===true;
+    const environmentLabel=paymentMode==='live'?'Live':paymentMode==='sandbox'?'Sandbox':paymentMode==='invalid'?'Invalid':'Unavailable';
     const topPill=$('topEnvPill');
     if(topPill)topPill.innerHTML='<span class="dot"></span>'+(paymentsEnabled?environmentLabel+' payments':environmentLabel+' setup incomplete');
     const sideTitle=$('sideEnvTitle');
