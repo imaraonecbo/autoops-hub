@@ -1042,7 +1042,7 @@ async def customer_portal():
 const $=id=>document.getElementById(id);
 const accountNotice=$('accountNotice'),jobNotice=$('jobNotice'),reportList=$('reportList'),reportResult=$('reportResult'),billingNotice=$('billingNotice'),settingsAccountNotice=$('settingsAccountNotice');
 const authControls=$('authControls'),signedInPanel=$('signedInPanel'),signedInLabel=$('signedInLabel');
-let currentUser=null,currentProfile=null,reportsCache=[],paymentMode='sandbox',paymentsEnabled=false,lastApiLatencyMs=null,lastExecutionStarted=0,lastRawPreviewFile=null,lastRawPreviewText=null,paypalFundingInitializationAttempted=false;
+let currentUser=null,currentProfile=null,reportsCache=[],paymentMode='unknown',paymentsEnabled=false,lastApiLatencyMs=null,lastExecutionStarted=0,lastRawPreviewFile=null,lastRawPreviewText=null,paypalFundingInitializationAttempted=false;
 async function configurePaymentMode(){
   try{
     const health=await api('/api/v1/health');
