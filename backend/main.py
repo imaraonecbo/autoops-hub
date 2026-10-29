@@ -74,10 +74,20 @@ PAYPAL_API_BASE = os.getenv("PAYPAL_API_BASE", PAYPAL_SANDBOX_API_BASE).rstrip("
 PAYPAL_LIVE_ENABLED = os.getenv("PAYPAL_LIVE_ENABLED", "false").strip().lower() in {"true", "1", "yes"}
 COINBASE_WEBHOOK_SECRET = os.getenv("COINBASE_WEBHOOK_SECRET", "").strip()
 
+def _credential_is_configured(value: str) -> bool:
+    normalized = value.strip().lower()
+    return bool(normalized and "placeholder" not in normalized and "unconfigured" not in normalized)
+
+def _paypal_credential_checks() -> Dict[str, bool]:
+    # Report presence only; never expose credential values through health diagnostics.
+    return {
+        "client_id": _credential_is_configured(PAYPAL_CLIENT_ID),
+        "client_secret": _credential_is_configured(PAYPAL_CLIENT_SECRET),
+        "webhook_id": _credential_is_configured(PAYPAL_WEBHOOK_ID),
+    }
+
 def _paypal_credentials_configured() -> bool:
-    values = (PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_WEBHOOK_ID)
-    return all(value and "placeholder" not in value.lower() and "unconfigured" not in value.lower()
-               for value in values)
+    return all(_paypal_credential_checks().values())
 
 def _paypal_mode() -> str:
     if PAYPAL_API_BASE == PAYPAL_LIVE_API_BASE:
@@ -421,8 +431,6 @@ async def process_supported_file(
 
 async def verify_paypal_signature(request: Request, event: Dict[str, Any]) -> None:
     """Ask PayPal's official verification API to validate the exact webhook headers and event."""
-    _assert_paypal_runtime_ready()
-
     header_names = {
         "transmission_id": "PAYPAL-TRANSMISSION-ID",
         "transmission_time": "PAYPAL-TRANSMISSION-TIME",
@@ -436,6 +444,8 @@ async def verify_paypal_signature(request: Request, event: Dict[str, Any]) -> No
         if not value:
             raise HTTPException(status_code=401, detail="Required PayPal signature headers are missing.")
         verification_payload[field] = value
+    # Reject missing signature headers as an authentication failure even if PayPal config is incomplete.
+    _assert_paypal_runtime_ready()
     verification_payload["webhook_id"] = PAYPAL_WEBHOOK_ID
     verification_payload["webhook_event"] = event
 
@@ -725,6 +735,8 @@ async def health_check():
         "database_reachable": False,
         "payment_mode": mode,
         "paypal_credentials_configured": _paypal_credentials_configured(),
+        "paypal_credential_checks": _paypal_credential_checks(),
+        "paypal_live_enabled": PAYPAL_LIVE_ENABLED,
         "paypal_checkout_enabled": paypal_ready,
     }
     if supabase is not None:
@@ -876,12 +888,25 @@ document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('
 $('menuBtn').addEventListener('click',()=>{$('sidebar').classList.toggle('open');$('navOverlay').classList.toggle('open')});
 $('navOverlay').addEventListener('click',()=>{$('sidebar').classList.remove('open');$('navOverlay').classList.remove('open')});
 $('overviewStartJob').addEventListener('click',()=>setNavView('jobs'));$('heroJobBtn').addEventListener('click',()=>setNavView('jobs'));$('heroReportsBtn').addEventListener('click',()=>setNavView('jobs'));$('heroPlansBtn').addEventListener('click',()=>setNavView('billing'));
-function setSignedInUI(data){currentUser=data.user;currentProfile=data.profile||{};const email=(data.user&&data.user.email)||'Signed-in user';const tier=currentProfile.current_tier||'free';const label=({'free':'Free','tier_1_51':'Basic','tier_2_83':'Scale','tier_3_129':'Ultimate'})[tier]||tier;authControls.hidden=true;signedInPanel.hidden=false;signedInLabel.textContent=email;$('settingsAccountCaption').textContent='Current access: '+label;$('settingsAvatar').textContent=(email[0]||'A').toUpperCase();$('topAvatar').textContent=(email[0]||'A').toUpperCase();$('topUserName').textContent=email;$('topUserMeta').textContent='Access tier: '+label;$('metricTier').textContent=label;$('metricTierNote').textContent='Authenticated account';$('welcomeTitle').textContent='Your workspace is connected.';$('welcomeCopy').textContent='Account: '+email+'. You can submit a CSV job, view saved reports, and choose a plan from Billing & Plans.';$('sideEnvTitle').textContent='Sandbox environment';$('sideEnvCopy').textContent='PayPal Sandbox test orders only. Live billing has not been enabled.'}
+function setSignedInUI(data){currentUser=data.user;currentProfile=data.profile||{};const email=(data.user&&data.user.email)||'Signed-in user';const tier=currentProfile.current_tier||'free';const label=({'free':'Free','tier_1_51':'Basic','tier_2_83':'Scale','tier_3_129':'Ultimate'})[tier]||tier;authControls.hidden=true;signedInPanel.hidden=false;signedInLabel.textContent=email;$('settingsAccountCaption').textContent='Current access: '+label;$('settingsAvatar').textContent=(email[0]||'A').toUpperCase();$('topAvatar').textContent=(email[0]||'A').toUpperCase();$('topUserName').textContent=email;$('topUserMeta').textContent='Access tier: '+label;$('metricTier').textContent=label;$('metricTierNote').textContent='Authenticated account';$('welcomeTitle').textContent='Your workspace is connected.';$('welcomeCopy').textContent='Account: '+email+'. You can submit a CSV job, view saved reports, and choose a plan from Billing & Plans.';}
 function setSignedOutUI(){currentUser=null;currentProfile=null;authControls.hidden=false;signedInPanel.hidden=true;$('topAvatar').textContent='A';$('topUserName').textContent='Guest workspace';$('topUserMeta').textContent='Sign in to sync reports';$('metricTier').textContent='Guest';$('metricTierNote').textContent='Sign in to view your tier';$('welcomeTitle').textContent='Your workspace, ready.';$('welcomeCopy').textContent='Sign in to link jobs, billing, and reports to your account. A CSV output is created only when you submit a valid file.'}
 async function loadAccount(silent){try{const data=await api('/api/v1/auth/me');setSignedInUI(data);if(!silent)notice(accountNotice,'You are signed in. Choose a plan or run a CSV job.','good');if(settingsAccountNotice)notice(settingsAccountNotice,'Signed in as '+(data.user.email||data.user.id)+'.','good');return true}catch(e){setSignedOutUI();return false}}
 async function authenticate(mode){const body=credentials();const data=await api('/api/v1/auth/'+mode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(data.user){setNavView('overview');await loadAccount(true);await loadReports();notice(accountNotice,data.message||'Signed in successfully.','good')}else{notice(settingsAccountNotice,data.message||'Account created. Check your email to confirm it.','good')}}
 async function logout(){await api('/api/v1/auth/logout',{method:'POST'});setSignedOutUI();reportsCache=[];reportList.className='report-empty';reportList.textContent='Sign in to load your private report history.';reportResult.replaceChildren();notice(settingsAccountNotice,'You have signed out. Sign in again to access your private reports or checkout.','good')}
-async function checkout(){await configurePaymentMode();if(!paymentsEnabled)throw new Error('Checkout is disabled because payment or database readiness has not been verified. Please try again after the service is configured.');const signedIn=await loadAccount(true);if(!signedIn){setNavView('settings');throw new Error('Please sign in to AutoOps Hub first. The order will be linked to the account that is signed in.')}const data=await api('/api/v1/payments/paypal/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:$('tier').value})});if(!data.approval_url)throw new Error('PayPal did not return an approval link. Check the configured credentials and try again.');let approval;try{approval=new URL(data.approval_url)}catch(e){throw new Error('PayPal returned an invalid approval URL. No redirect was attempted.')}const allowedHosts=paymentMode==='live'?['www.paypal.com','paypal.com']:['www.sandbox.paypal.com','sandbox.paypal.com'];if(approval.protocol!=='https:'||!allowedHosts.includes(approval.hostname))throw new Error('PayPal returned an approval URL for the wrong payment environment. No redirect was attempted.');notice(billingNotice,(paymentMode==='live'?'Live':'Sandbox')+' order created for 
+async function checkout(){
+  await configurePaymentMode();
+  if(!paymentsEnabled)throw new Error('Checkout is disabled because payment or database readiness has not been verified. Please try again after the service is configured.');
+  const signedIn=await loadAccount(true);
+  if(!signedIn){setNavView('settings');throw new Error('Please sign in to AutoOps Hub first. The order will be linked to the account that is signed in.')}
+  const data=await api('/api/v1/payments/paypal/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:$('tier').value})});
+  if(!data.approval_url)throw new Error('PayPal did not return an approval link. Check the configured credentials and try again.');
+  let approval;
+  try{approval=new URL(data.approval_url)}catch(e){throw new Error('PayPal returned an invalid approval URL. No redirect was attempted.')}
+  const allowedHosts=paymentMode==='live'?['www.paypal.com','paypal.com']:['www.sandbox.paypal.com','sandbox.paypal.com'];
+  if(approval.protocol!=='https:'||!allowedHosts.includes(approval.hostname))throw new Error('PayPal returned an approval URL for the wrong payment environment. No redirect was attempted.');
+  notice(billingNotice,(paymentMode==='live'?'Live':'Sandbox')+' order created. Redirecting to PayPal for approval.','good');
+  window.location.assign(approval.href);
+}
 async function captureReturned(){const orderId=new URLSearchParams(window.location.search).get('token');if(!orderId)throw new Error('No PayPal order token was found. Start checkout and return here after approving the PayPal order.');const data=await api('/api/v1/payments/paypal/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:orderId})});window.history.replaceState({},'',window.location.pathname+'#billing');notice(billingNotice,data.message||'Payment verification completed.','good');await loadAccount(true);await loadReports()}
 async function handleAuthCallback(){const hash=new URLSearchParams(window.location.hash.replace(/^#/,''));const query=new URLSearchParams(window.location.search);const accessToken=hash.get('access_token')||query.get('access_token');const authError=hash.get('error_description')||query.get('error_description')||hash.get('error')||query.get('error');if(authError)throw new Error('Email confirmation did not complete: '+authError.replace(/\+/g,' '));if(accessToken){const data=await api('/api/v1/auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:accessToken})});window.history.replaceState({},'',window.location.pathname+'#overview');notice(accountNotice,data.message||'Email confirmed. You are signed in.','good');await loadAccount(true);await loadReports();return true}if(query.get('auth')==='confirmed'){setNavView('settings');notice(settingsAccountNotice,'Email confirmation completed. Sign in below to continue.','good');window.history.replaceState({},'',window.location.pathname+'#settings');return true}return false}
 function downloadReport(name,value,format){const ext=(format||'csv').toLowerCase()==='json'?'json':'csv';const blob=new Blob([value],{type:ext==='json'?'application/json;charset=utf-8':'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(name||'autoops-report').replace(/[^a-z0-9_.-]/gi,'_')+'.'+ext;document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}
@@ -898,7 +923,7 @@ $('checkoutBtn').addEventListener('click',()=>busy($('checkoutBtn'),checkout));
 $('submitJobBtn').addEventListener('click',()=>busy($('submitJobBtn'),submitJob));
 $('refreshBtn').addEventListener('click',()=>busy($('refreshBtn'),loadReports));
 document.querySelectorAll('.plan-select').forEach(button=>button.addEventListener('click',()=>{$('tier').value=button.dataset.tier;document.querySelectorAll('.price-card').forEach(card=>card.classList.toggle('selected-plan',card.dataset.priceTier===button.dataset.tier));document.querySelectorAll('.plan-select').forEach(b=>{b.textContent='Select '+({'tier_1_51':'Basic','tier_2_83':'Scale','tier_3_129':'Ultimate'})[b.dataset.tier];});button.textContent='Selected';notice(billingNotice,$('tier').selectedOptions[0].text+' selected. Continue to '+(paymentMode==='live'?'PayPal':'PayPal Sandbox')+' to create an order.','good');$('checkoutBtn').scrollIntoView({behavior:'smooth',block:'center'})}));
-(async()=>{applyPreferences();setNavView((window.location.hash||'#overview').slice(1));try{if(await handleAuthCallback())return;const query=new URLSearchParams(window.location.search);if(query.get('payment')==='success'&&query.get('token')){setNavView('billing');await captureReturned();return}if(query.get('payment')==='cancelled'){setNavView('billing');notice(billingNotice,'PayPal checkout was cancelled. No payment was captured. You can choose a plan and try again.','error');window.history.replaceState({},'',window.location.pathname+'#billing')}const signed=await loadAccount(true);if(signed)await loadReports();else await loadReports()}catch(e){notice(accountNotice,e.message,'error')}})();
+(async()=>{applyPreferences();setNavView((window.location.hash||'#overview').slice(1));try{await configurePaymentMode();if(await handleAuthCallback())return;const query=new URLSearchParams(window.location.search);if(query.get('payment')==='success'&&query.get('token')){setNavView('billing');await captureReturned();return}if(query.get('payment')==='cancelled'){setNavView('billing');notice(billingNotice,'PayPal checkout was cancelled. No payment was captured. You can choose a plan and try again.','error');window.history.replaceState({},'',window.location.pathname+'#billing')}const signed=await loadAccount(true);if(signed)await loadReports();else await loadReports()}catch(e){notice(accountNotice,e.message,'error')}})();
 })();
 </script>
 </body>

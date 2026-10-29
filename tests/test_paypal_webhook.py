@@ -41,7 +41,9 @@ def receive_body(body):
 
 
 class PayPalWebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
-    async def test_verifier_fails_closed_when_credentials_missing(self):
+    async def test_unsigned_request_is_rejected_before_credential_checks(self):
+        # Missing signature headers are an authentication failure even if server
+        # credentials are also incomplete; never accept an unsigned delivery.
         with (
             patch.object(app_module, "PAYPAL_CLIENT_ID", ""),
             patch.object(app_module, "PAYPAL_CLIENT_SECRET", ""),
@@ -49,7 +51,7 @@ class PayPalWebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(HTTPException) as raised:
                 await app_module.verify_paypal_signature(make_request(), {})
-        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.status_code, 401)
 
     async def test_verifier_rejects_missing_signature_headers(self):
         with (
