@@ -1080,6 +1080,7 @@ async function configurePaymentMode(){
     }
     if(paymentsEnabled)await initializePayPalFundingButtons();
   }catch(e){
+    paymentMode='unknown';
     paymentsEnabled=false;
     const pill=$('topEnvPill');
     if(pill)pill.innerHTML='<span class="dot"></span>Payment status unavailable';
