@@ -904,7 +904,12 @@ async def customer_portal():
 <div class="page-head"><div><div class="eyebrow">Workspace control</div><h1>Settings</h1><p>Manage your current session and workspace preferences. Payment credentials are intentionally kept on the server rather than exposed in browser settings.</p></div><span class="tag">Account preferences</span></div>
 <div class="grid settings-grid">
 <section class="card"><h3>Account &amp; session</h3><p class="sub">Your signed-in identity and current access status.</p>
-<div id="authControls"><div class="field"><label for="email">EMAIL ADDRESS</label><input id="email" type="email" autocomplete="email" placeholder="you@example.com"></div><div class="field"><label for="password">PASSWORD</label><input id="password" type="password" autocomplete="current-password" minlength="10" placeholder="At least 10 characters"></div><button class="btn block" id="signupBtn">Create account</button><button class="btn secondary block" id="loginBtn" style="margin-top:9px">Sign in</button><div class="sub" style="margin:12px 0 0">Use an email-confirmed account to create orders and save reports.</div></div>
+<div id="authControls"><div class="field"><label for="email">EMAIL ADDRESS</label><input id="email" type="email" autocomplete="email" placeholder="you@example.com"></div><div class="field"><label for="password">PASSWORD</label><input id="password" type="password" autocomplete="current-password" minlength="10" placeholder="At least 10 characters"></div><button class="btn block" id="signupBtn">Create account</button><button class="btn secondary block" id="loginBtn" style="margin-top:9px">Sign in</button><button class="btn ghost block" id="forgotPasswordBtn" style="margin-top:9px">Forgot password?</button>
+<div id="passwordRecoveryPanel" hidden style="margin-top:14px">
+<div class="field"><label for="recoveryPassword">NEW PASSWORD</label><input id="recoveryPassword" type="password" autocomplete="new-password" minlength="10" maxlength="256" placeholder="At least 10 characters"></div>
+<div class="field"><label for="recoveryPasswordConfirm">CONFIRM NEW PASSWORD</label><input id="recoveryPasswordConfirm" type="password" autocomplete="new-password" minlength="10" maxlength="256" placeholder="Enter the new password again"></div>
+<button class="btn block" id="updatePasswordBtn">Update password</button>
+</div><div class="sub" style="margin:12px 0 0">Use an email-confirmed account to create orders and save reports.</div></div>
 <div id="signedInPanel" hidden><div class="account-big"><div class="avatar" id="settingsAvatar">A</div><div><div class="account-email" id="signedInLabel">Signed in</div><div class="account-caption" id="settingsAccountCaption">Authenticated workspace</div></div></div><button class="btn ghost block" id="logoutBtn">Sign out of this session</button></div>
 <div class="notice" id="settingsAccountNotice" role="status" aria-live="polite"></div></section>
 <section class="card"><h3>Workspace preferences</h3><p class="sub">These display preferences are saved in this browser; they do not change billing or permissions.</p>
@@ -1093,7 +1098,34 @@ async function checkout(){
   window.location.assign(approval.href);
 }
 async function captureReturned(){const orderId=new URLSearchParams(window.location.search).get('token');if(!orderId)throw new Error('No PayPal order token was found. Start checkout and return here after approving the PayPal order.');const data=await api('/api/v1/payments/paypal/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:orderId})});window.history.replaceState({},'',window.location.pathname+'#billing');notice(billingNotice,data.message||'Payment verification completed.','good');await loadAccount(true);await loadReports()}
-async function handleAuthCallback(){const hash=new URLSearchParams(window.location.hash.replace(/^#/,''));const query=new URLSearchParams(window.location.search);const accessToken=hash.get('access_token')||query.get('access_token');const authError=hash.get('error_description')||query.get('error_description')||hash.get('error')||query.get('error');if(authError)throw new Error('Email confirmation did not complete: '+authError.replace(/\+/g,' '));if(accessToken){const data=await api('/api/v1/auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:accessToken})});window.history.replaceState({},'',window.location.pathname+'#overview');notice(accountNotice,data.message||'Email confirmed. You are signed in.','good');await loadAccount(true);await loadReports();return true}if(query.get('auth')==='confirmed'){setNavView('settings');notice(settingsAccountNotice,'Email confirmation completed. Sign in below to continue.','good');window.history.replaceState({},'',window.location.pathname+'#settings');return true}return false}
+async function handleAuthCallback(){
+ const hash=new URLSearchParams(window.location.hash.replace(/^#/,'')),query=new URLSearchParams(window.location.search);
+ const accessToken=hash.get('access_token')||query.get('access_token');
+ const authError=hash.get('error_description')||query.get('error_description')||hash.get('error')||query.get('error');
+ const isRecovery=hash.get('type')==='recovery'||query.get('type')==='recovery'||query.get('auth')==='recovery';
+ if(authError)throw new Error('The authentication link could not be completed. Request a new link and try again.');
+ if(accessToken){
+   await api('/api/v1/auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:accessToken})});
+   if(isRecovery){
+     window.history.replaceState({},'',window.location.pathname+'?auth=recovery#settings');
+     setNavView('settings');$('authControls').hidden=true;$('signedInPanel').hidden=true;
+     $('passwordRecoveryPanel').hidden=false;$('forgotPasswordBtn').hidden=true;
+     notice(settingsAccountNotice,'Recovery link verified. Choose a new password below.','good');
+     return true;
+   }
+   window.history.replaceState({},'',window.location.pathname+'#overview');
+   notice(accountNotice,'Email confirmation completed. You are signed in.','good');
+   await loadAccount(true);await loadReports();return true;
+ }
+ if(query.get('auth')==='recovery'){
+   setNavView('settings');
+   $('passwordRecoveryPanel').hidden=false;$('forgotPasswordBtn').hidden=true;
+   notice(settingsAccountNotice,'Open the password-reset link from your email to verify your account before choosing a new password.','good');
+   return true;
+ }
+ if(query.get('auth')==='confirmed'){setNavView('settings');notice(settingsAccountNotice,'Email confirmation completed. Sign in below to continue.','good');window.history.replaceState({},'',window.location.pathname+'#settings');return true}
+ return false;
+}
 function downloadReport(name,value,format){const ext=(format||'csv').toLowerCase()==='json'?'json':'csv';const blob=new Blob([value],{type:ext==='json'?'application/json;charset=utf-8':'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(name||'autoops-report').replace(/[^a-z0-9_.-]/gi,'_')+'.'+ext;document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}
 
 function updateLatencyKpi(path,milliseconds){
@@ -1237,6 +1269,22 @@ try{$('compactMode').checked=localStorage.getItem('autoops_compact')==='true';$(
 $('compactMode').addEventListener('change',applyPreferences);$('autoOpenLatest').addEventListener('change',()=>{applyPreferences();if(currentUser)loadReports()});
 $('signupBtn').addEventListener('click',()=>busy($('signupBtn'),()=>authenticate('signup')));
 $('loginBtn').addEventListener('click',()=>busy($('loginBtn'),()=>authenticate('login')));
+$('forgotPasswordBtn').addEventListener('click',()=>busy($('forgotPasswordBtn'),async()=>{
+ const email=$('email').value.trim();
+ if(!email||email.indexOf('@')<1)throw new Error('Enter the email address for your account first.');
+ const data=await api('/api/v1/auth/recover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+ notice(settingsAccountNotice,data.message||'If an account exists for that email, a reset link will arrive shortly.','good');
+}));
+$('updatePasswordBtn').addEventListener('click',()=>busy($('updatePasswordBtn'),async()=>{
+ const password=$('recoveryPassword').value,confirm=$('recoveryPasswordConfirm').value;
+ if(password.length<10||password.length>256)throw new Error('Use a password between 10 and 256 characters.');
+ if(password!==confirm)throw new Error('The new passwords do not match.');
+ const data=await api('/api/v1/auth/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+ $('passwordRecoveryPanel').hidden=true;$('forgotPasswordBtn').hidden=false;$('authControls').hidden=false;
+ setSignedOutUI();$('recoveryPassword').value='';$('recoveryPasswordConfirm').value='';
+ notice(settingsAccountNotice,data.message||'Password updated. Sign in again.','good');
+}));
+
 $('logoutBtn').addEventListener('click',()=>busy($('logoutBtn'),logout));
 $('checkoutBtn').addEventListener('click',()=>busy($('checkoutBtn'),checkout));
 $('submitJobBtn').addEventListener('click',()=>busy($('submitJobBtn'),submitJob));
@@ -1286,6 +1334,59 @@ async def auth_session(payload: Dict[str, Any], response: Response):
     except Exception:
         logger.exception("Supabase confirmation session exchange failed.")
         raise HTTPException(status_code=503, detail="Could not complete email confirmation. Please sign in again.")
+
+@app.post("/api/v1/auth/recover")
+async def auth_recover(payload: Dict[str, Any]):
+    """Send a password-reset link without revealing whether an email is registered."""
+    email = str(payload.get("email", "")).strip().lower()
+    if "@" not in email or len(email) > 320:
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+    public_app_url = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+    if not public_app_url.startswith("https://"):
+        raise HTTPException(status_code=503, detail="Password recovery is temporarily unavailable.")
+    redirect_to = f"{public_app_url}/?auth=recovery"
+    try:
+        await _supabase_auth_call("recover?redirect_to=" + quote(redirect_to, safe=""), {"email": email})
+    except HTTPException as exc:
+        # Auth errors for unknown/disabled addresses must not reveal account existence.
+        if exc.status_code >= 500:
+            raise HTTPException(status_code=503, detail="Password recovery is temporarily unavailable.")
+        logger.info("Password recovery requested; Auth did not accept the request.")
+    return {"success": True, "message": "If an account exists for that email, a password-reset link will arrive shortly."}
+
+@app.post("/api/v1/auth/password")
+async def auth_update_password(payload: Dict[str, Any], request: Request, response: Response):
+    """Change the password only for the account represented by a valid Supabase session."""
+    user = await get_authenticated_user(request)
+    password = str(payload.get("password", ""))
+    if len(password) < 10 or len(password) > 256:
+        raise HTTPException(status_code=400, detail="Use a password between 10 and 256 characters.")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            updated = await client.put(
+                f"{SUPABASE_URL.rstrip('/')}/auth/v1/user",
+                headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {user['token']}", "Content-Type": "application/json"},
+                json={"password": password},
+            )
+        if updated.status_code >= 400:
+            logger.warning("Supabase rejected a password update for a validated session (HTTP %s).", updated.status_code)
+            raise HTTPException(status_code=400, detail="The reset link may have expired. Request a new password-reset email and try again.")
+        # Do not leave the recovery session active after the password changes.
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(8.0)) as client:
+                await client.post(
+                    f"{SUPABASE_URL.rstrip('/')}/auth/v1/logout",
+                    headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {user['token']}"},
+                )
+        except Exception:
+            logger.warning("Password changed; remote sign-out of recovery session could not be confirmed.")
+        response.delete_cookie("autoops_session", path="/", secure=True, httponly=True, samesite="lax")
+        return {"success": True, "message": "Password updated. Sign in again using your new password.", "user_id": user["user_id"]}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Supabase password update failed.")
+        raise HTTPException(status_code=503, detail="Password update is temporarily unavailable.")
 
 @app.post("/api/v1/auth/login")
 async def auth_login(payload: Dict[str, Any], response: Response):
