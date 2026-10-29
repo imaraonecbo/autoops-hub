@@ -1209,7 +1209,7 @@ document.querySelectorAll('.plan-select').forEach(button=>button.addEventListene
 })();
 </script>
 </body>
-</html>
+</html>''')
 
 @app.post("/api/v1/auth/signup")
 async def auth_signup(payload: Dict[str, Any], response: Response):
