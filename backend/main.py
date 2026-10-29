@@ -983,7 +983,7 @@ async function initializePayPalFundingButtons(){
           'client-id':config.client_id,
           currency:config.currency||'USD',
           intent:'capture',
-          components:'buttons,funding-eligibility'
+          components:'buttons'
         });
         script.src='https://www.paypal.com/sdk/js?'+params.toString();
         script.async=true;
@@ -993,7 +993,7 @@ async function initializePayPalFundingButtons(){
         document.head.appendChild(script);
       });
     }
-    if(!window.paypal||typeof window.paypal.Buttons!=='function'||typeof window.paypal.getFundingSources!=='function')throw new Error('PayPal funding eligibility is unavailable.');
+    if(!window.paypal||typeof window.paypal.Buttons!=='function'||!window.paypal.FUNDING)throw new Error('PayPal funding eligibility is unavailable.');
     const allowedSources=[
       window.paypal.FUNDING.PAYPAL,
       window.paypal.FUNDING.CARD,
