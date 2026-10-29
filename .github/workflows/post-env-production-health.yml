@@ -1,0 +1,44 @@
+name: Post-environment production health check
+on:
+  pull_request:
+    branches:
+      - production-paypal-live-20261028
+permissions:
+  contents: read
+jobs:
+  production-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check public production health and PayPal readiness flags
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoops-hub-production.onrender.com"
+          curl --connect-timeout 10 --max-time 60 --retry 3 --retry-delay 5 --fail --silent --show-error "$base/api/v1/health" -o health.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          h=json.loads(Path("health.json").read_text())
+          keys=("status","database_configured","database_reachable","payment_mode","paypal_live_enabled","paypal_credentials_configured","paypal_credential_checks","paypal_checkout_enabled")
+          print(json.dumps({k:h.get(k) for k in keys},indent=2,sort_keys=True))
+          if h.get("status") != "ok":
+              raise SystemExit("Production health is not ok")
+          if h.get("database_reachable") is not True:
+              raise SystemExit("Production database is not reachable")
+          if h.get("payment_mode") != "live" or h.get("paypal_live_enabled") is not True:
+              raise SystemExit("Live mode is not enabled")
+          if h.get("paypal_credentials_configured") is not True:
+              raise SystemExit("One or more PayPal credentials are not detected")
+          if h.get("paypal_checkout_enabled") is not True:
+              raise SystemExit("Live checkout readiness gate is still closed")
+          PY
+      - name: Ensure unsigned PayPal webhook is rejected
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoops-hub-production.onrender.com"
+          code=$(curl --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 3 --silent --show-error --output webhook.json --write-out '%{http_code}' -X POST -H 'Content-Type: application/json' --data '{"id":"AUTOOPS-UNSIGNED-POST-ENV-CHECK","event_type":"PAYMENT.CAPTURE.COMPLETED","resource":{}}' "$base/api/v1/payments/paypal-webhook")
+          echo "Unsigned webhook HTTP status: $code"
+          cat webhook.json
+          test "$code" = "401"
+          echo "PASS: unsigned webhook rejected."
