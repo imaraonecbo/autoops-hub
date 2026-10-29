@@ -55,8 +55,12 @@ jobs:
               raise SystemExit("Production health is not ok.")
           if health.get("database_configured") is not True or health.get("database_reachable") is not True:
               raise SystemExit("Production database readiness check failed.")
+          if health.get("payment_mode") != "live" or health.get("paypal_live_enabled") is not True:
+              raise SystemExit("Production is not configured for PayPal Live API checkout.")
+          if paypal.get("mode") != "live":
+              raise SystemExit("Public PayPal config did not report live mode.")
           if health.get("paypal_checkout_enabled") is not True or paypal.get("enabled") is not True:
-              raise SystemExit("Production PayPal checkout is not enabled.")
+              raise SystemExit("Production PayPal Live checkout is not enabled.")
           PY
           test "$auth_status" = "401" || { echo "Unauthenticated /auth/me returned $auth_status (expected 401)"; exit 1; }
           test "$order_status" = "401" || { echo "Unauthenticated order creation returned $order_status (expected 401; no order should be created)"; exit 1; }
