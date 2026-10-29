@@ -68,9 +68,8 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
 PAYPAL_WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "").strip()
 PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "").strip()
 PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_CLIENT_SECRET", "").strip()
-PAYPAL_SANDBOX_API_BASE = "https://api-m.sandbox.paypal.com"
 PAYPAL_LIVE_API_BASE = "https://api-m.paypal.com"
-PAYPAL_API_BASE = os.getenv("PAYPAL_API_BASE", PAYPAL_SANDBOX_API_BASE).rstrip("/")
+PAYPAL_API_BASE = PAYPAL_LIVE_API_BASE  # Fixed live endpoint; environment overrides are not supported.
 PAYPAL_LIVE_ENABLED = os.getenv("PAYPAL_LIVE_ENABLED", "false").strip().lower() in {"true", "1", "yes"}
 COINBASE_WEBHOOK_SECRET = os.getenv("COINBASE_WEBHOOK_SECRET", "").strip()
 
@@ -90,16 +89,12 @@ def _paypal_credentials_configured() -> bool:
     return all(_paypal_credential_checks().values())
 
 def _paypal_mode() -> str:
-    if PAYPAL_API_BASE == PAYPAL_LIVE_API_BASE:
-        return "live"
-    if PAYPAL_API_BASE == PAYPAL_SANDBOX_API_BASE:
-        return "sandbox"
-    return "invalid"
+    return "live" if PAYPAL_API_BASE == PAYPAL_LIVE_API_BASE else "invalid"
 
 def _assert_paypal_runtime_ready() -> None:
     mode = _paypal_mode()
     if mode == "invalid":
-        raise HTTPException(status_code=503, detail="PayPal API host is not an approved Sandbox or Live endpoint.")
+        raise HTTPException(status_code=503, detail="Only the PayPal Live API endpoint is supported.")
     if not _paypal_credentials_configured():
         raise HTTPException(status_code=503, detail="PayPal credentials are not fully configured for this environment.")
     if mode == "live" and not PAYPAL_LIVE_ENABLED:
@@ -840,7 +835,7 @@ def _record_marketing_event(
 async def health_check():
     """Non-sensitive readiness probe; checks actual PostgREST connectivity."""
     mode = _paypal_mode()
-    paypal_ready = _paypal_credentials_configured() and mode != "invalid" and (mode != "live" or PAYPAL_LIVE_ENABLED)
+    paypal_ready = _paypal_credentials_configured() and mode == "live" and PAYPAL_LIVE_ENABLED
     result = {
         "status": "ok",
         "database_configured": bool(supabase),
@@ -1053,7 +1048,7 @@ async function configurePaymentMode(){
     if(!health)throw new Error('Payment readiness could not be confirmed.');
     paymentMode=health.payment_mode||'unknown';
     paymentsEnabled=health.status==='ok'&&health.database_configured===true&&health.database_reachable===true&&health.paypal_checkout_enabled===true;
-    const environmentLabel=paymentMode==='live'?'Live':paymentMode==='sandbox'?'Sandbox':paymentMode==='invalid'?'Invalid':'Unavailable';
+    const environmentLabel=paymentMode==='live'?'Live':paymentMode==='invalid'?'Invalid':'Unavailable';
     const topPill=$('topEnvPill');
     if(topPill)topPill.innerHTML='<span class="dot"></span>'+(paymentsEnabled?environmentLabel+' payments':environmentLabel+' setup incomplete');
     const sideTitle=$('sideEnvTitle');
@@ -1211,9 +1206,9 @@ async function checkout(){
   if(!data.approval_url)throw new Error('PayPal did not return an approval link. Check the configured credentials and try again.');
   let approval;
   try{approval=new URL(data.approval_url)}catch(e){throw new Error('PayPal returned an invalid approval URL. No redirect was attempted.')}
-  const allowedHosts=paymentMode==='live'?['www.paypal.com','paypal.com']:['www.sandbox.paypal.com','sandbox.paypal.com'];
+  const allowedHosts=['www.paypal.com','paypal.com'];
   if(approval.protocol!=='https:'||!allowedHosts.includes(approval.hostname))throw new Error('PayPal returned an approval URL for the wrong payment environment. No redirect was attempted.');
-  notice(billingNotice,(paymentMode==='live'?'Live':'Sandbox')+' order created. Redirecting to PayPal for approval.','good');
+  notice(billingNotice,'Live PayPal order created. Redirecting to PayPal for approval.','good');
   window.location.assign(approval.href);
 }
 async function captureReturned(){const orderId=new URLSearchParams(window.location.search).get('token');if(!orderId)throw new Error('No PayPal order token was found. Start checkout and return here after approving the PayPal order.');const data=await api('/api/v1/payments/paypal/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:orderId})});window.history.replaceState({},'',window.location.pathname+'#billing');notice(billingNotice,data.message||'Payment verification completed.','good');await loadAccount(true);await loadReports()}
@@ -1626,7 +1621,7 @@ async def _paypal_access_token() -> str:
         raise
     except Exception:
         logger.exception("PayPal OAuth failed.")
-        raise HTTPException(status_code=503, detail="PayPal authentication failed; verify the credentials belong to the selected environment and REST app.")
+        raise HTTPException(status_code=503, detail="PayPal live authentication failed; verify the live REST app credentials.")
 
 @app.get("/api/v1/payments/paypal/public-config")
 async def paypal_public_config(response: Response):
@@ -1635,8 +1630,8 @@ async def paypal_public_config(response: Response):
     mode = _paypal_mode()
     enabled = (
         _paypal_credentials_configured()
-        and mode != "invalid"
-        and (mode != "live" or PAYPAL_LIVE_ENABLED)
+        and mode == "live"
+        and PAYPAL_LIVE_ENABLED
         and _credential_is_configured(PAYPAL_CLIENT_ID)
     )
     if not enabled:

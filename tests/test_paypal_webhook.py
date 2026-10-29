@@ -85,6 +85,7 @@ class PayPalWebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
             patch.object(app_module, "PAYPAL_CLIENT_ID", "configured-client"),
             patch.object(app_module, "PAYPAL_CLIENT_SECRET", "configured-secret"),
             patch.object(app_module, "PAYPAL_WEBHOOK_ID", "WH-configured"),
+            patch.object(app_module, "PAYPAL_LIVE_ENABLED", True),
             patch.object(app_module.httpx, "AsyncClient", return_value=fake_client),
         ):
             await app_module.verify_paypal_signature(make_request(headers=headers), {"id": "EVENT-1"})
