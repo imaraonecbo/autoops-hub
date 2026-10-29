@@ -1,0 +1,57 @@
+name: Production runtime smoke check
+
+on:
+  pull_request:
+    branches:
+      - production-paypal-live-20261028
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify live health and safe payment flags
+        run: |
+          set -euo pipefail
+          base="https://autoops-hub-production.onrender.com"
+          curl --connect-timeout 10 --max-time 45 --retry 3 --retry-delay 5 --fail --silent --show-error "$base/api/v1/health" -o health.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          h=json.loads(Path("health.json").read_text())
+          print(json.dumps({k:h.get(k) for k in (
+            "status","database_configured","database_reachable","payment_mode",
+            "paypal_live_enabled","paypal_credentials_configured",
+            "paypal_credential_checks","paypal_checkout_enabled")}, sort_keys=True))
+          if h.get("status") != "ok" or h.get("database_reachable") is not True:
+              raise SystemExit("Production health/database check failed.")
+          PY
+      - name: Verify deployed dashboard JavaScript parses
+        run: |
+          set -euo pipefail
+          curl --connect-timeout 10 --max-time 45 --retry 3 --retry-delay 5 --fail --silent --show-error "https://autoops-hub-production.onrender.com/" -o dashboard.html
+          python - <<'PY'
+          from pathlib import Path
+          html=Path("dashboard.html").read_text(encoding="utf-8")
+          if "<script>" not in html or "</script>" not in html:
+              raise SystemExit("Dashboard script block is missing.")
+          script=html.split("<script>",1)[1].split("</script>",1)[0]
+          Path("dashboard.js").write_text(script,encoding="utf-8")
+          print(f"Extracted deployed dashboard script ({len(script)} characters).")
+          PY
+          node --check dashboard.js
+      - name: Verify live endpoint rejects unsigned PayPal webhook
+        run: |
+          set -euo pipefail
+          base="https://autoops-hub-production.onrender.com"
+          code=$(curl --connect-timeout 10 --max-time 45 --retry 2 --retry-delay 3 --silent --show-error --output webhook.json --write-out '%{http_code}' -X POST -H 'Content-Type: application/json' --data '{"id":"AUTOOPS-UNSIGNED-RUNTIME-CHECK","event_type":"PAYMENT.CAPTURE.COMPLETED","resource":{}}' "$base/api/v1/payments/paypal-webhook")
+          echo "Unsigned webhook HTTP status: $code"
+          cat webhook.json
+          test "$code" = "401"
+          echo "PASS: deployed endpoint rejected an unsigned webhook."
