@@ -896,7 +896,7 @@ async def customer_portal():
 <article class="price-card featured" data-price-tier="tier_2_83"><div class="plan-label">SCALE · TECHNICAL OPERATIONS</div><div class="price">$149</div><div class="once">USD · one-time payment</div><p class="feature-note">For teams working with spreadsheets, JSON payloads and operational logs.</p><ul><li><b>Everything in Basic, plus:</b></li><li>Multi-sheet Excel (.xlsx) cleaning and consolidation</li><li>JSON payload formatting and error-field scan</li><li>Filter JSON event arrays to error/exception records</li><li>Server log parsing and structured stack-trace summaries</li><li>Blank-row removal, exact deduplication and missing-value counts</li><li>Up to 25,000 rows or entries per file</li><li>300 jobs included per purchase</li></ul><button class="btn plan-select" data-tier="tier_2_83">Select Scale</button></article>
 <article class="price-card" data-price-tier="tier_3_129"><div class="plan-label">ULTIMATE · MERCHANT &amp; ENTERPRISE</div><div class="price">$299</div><div class="once">USD · one-time payment</div><p class="feature-note">For high-volume catalogs, order exports, and data-quality review.</p><ul><li><b>Everything in Scale, plus:</b></li><li>Catalog SKU, price and inventory standardization for sync-ready exports (external store writes are not enabled)</li><li>Order price, currency, address and phone normalization</li><li>User export email validation and duplicate identity resolution</li><li>Deep type inference, anomaly detection and quality flags</li><li>Enterprise API route and retrievable historical reports</li><li>Up to 250,000 rows or entries per file</li><li>1,500 jobs included per purchase</li></ul><button class="btn plan-select" data-tier="tier_3_129">Select Ultimate</button></article>
 </div>
-<div class="workspace" style="margin-top:16px"><section class="card"><h3>Complete PayPal checkout</h3><p class="sub">Sign in to AutoOps Hub first. PayPal will securely ask you to approve the one-time payment before the order is completed.</p><div class="field"><label for="tier">SELECT PLAN</label><select id="tier"><option value="tier_1_51">Basic — $79 USD</option><option value="tier_2_83">Scale — $149 USD</option><option value="tier_3_129">Ultimate — $299 USD</option></select></div><button class="btn block" id="checkoutBtn" disabled>Checking secure checkout…</button><div class="notice" id="billingNotice" role="status" aria-live="polite"></div></section>
+<div class="workspace" style="margin-top:16px"><section class="card"><h3>Complete PayPal checkout</h3><p class="sub">Sign in to AutoOps Hub first. PayPal will securely ask you to approve the one-time payment before the order is completed.</p><div class="field"><label for="tier">SELECT PLAN</label><select id="tier"><option value="tier_1_51">Basic — $79 USD</option><option value="tier_2_83">Scale — $149 USD</option><option value="tier_3_129">Ultimate — $299 USD</option></select></div><div id="paypal-button-container" aria-label="Available PayPal payment methods"></div><p class="sub" id="paypalFundingNote" aria-live="polite">Loading payment options supported for your account and the customer’s location.</p><button class="btn block" id="checkoutBtn" style="display:none" disabled>Continue to PayPal →</button><div class="notice" id="billingNotice" role="status" aria-live="polite"></div></section>
 <section class="card"><h3>Billing clarity</h3><p class="sub">The current integration creates a one-time PayPal order. Automatic renewals, invoices, refunds, tax calculation, and a customer-facing payment management portal are not represented as available features yet.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Order is created by the server and associated with the signed-in account.</span></div><div class="security-item"><span class="security-check">✓</span><span>Capture amount and plan are checked before a tier upgrade is applied.</span></div><div class="security-item"><span class="security-check">!</span><span>Payment processing is confirmed by the server before credits are granted; if checkout is unavailable, try again later or contact support.</span></div></div></section></div>
 </section>
 
@@ -925,7 +925,7 @@ async def customer_portal():
 const $=id=>document.getElementById(id);
 const accountNotice=$('accountNotice'),jobNotice=$('jobNotice'),reportList=$('reportList'),reportResult=$('reportResult'),billingNotice=$('billingNotice'),settingsAccountNotice=$('settingsAccountNotice');
 const authControls=$('authControls'),signedInPanel=$('signedInPanel'),signedInLabel=$('signedInLabel');
-let currentUser=null,currentProfile=null,reportsCache=[],paymentMode='sandbox',paymentsEnabled=false,lastApiLatencyMs=null,lastExecutionStarted=0,lastRawPreviewFile=null,lastRawPreviewText=null;
+let currentUser=null,currentProfile=null,reportsCache=[],paymentMode='sandbox',paymentsEnabled=false,lastApiLatencyMs=null,lastExecutionStarted=0,lastRawPreviewFile=null,lastRawPreviewText=null,paypalFundingInitializationAttempted=false;
 async function configurePaymentMode(){
   try{
     const health=await api('/api/v1/health');
@@ -952,16 +952,114 @@ async function configurePaymentMode(){
     if(button){
       button.disabled=!paymentsEnabled;
       button.textContent=paymentsEnabled?'Continue to PayPal →':'Checkout temporarily unavailable';
-      button.title=paymentsEnabled?'Continue to PayPal to approve your one-time payment.':'Checkout is disabled until payment and database readiness are verified.';
+      button.title=paymentsEnabled?'Continue to PayPal if the payment choices below cannot load.':'Checkout is disabled until payment and database readiness are verified.';
+      button.style.display=paymentsEnabled?'none':'block';
       if(paymentsEnabled)button.removeAttribute('aria-disabled');else button.setAttribute('aria-disabled','true');
     }
+    if(paymentsEnabled)await initializePayPalFundingButtons();
   }catch(e){
     paymentsEnabled=false;
     const pill=$('topEnvPill');
     if(pill)pill.innerHTML='<span class="dot"></span>Payment status unavailable';
     const sideCopy=$('sideEnvCopy');
     if(sideCopy)sideCopy.textContent='Your reports are private to your signed-in account.';
-    const button=$('checkoutBtn');if(button){button.disabled=true;button.textContent='Checkout temporarily unavailable';button.setAttribute('aria-disabled','true');}
+    const button=$('checkoutBtn');if(button){button.disabled=true;button.textContent='Checkout temporarily unavailable';button.style.display='block';button.setAttribute('aria-disabled','true');}
+    const container=$('paypal-button-container');if(container)container.replaceChildren();
+    const fundingNote=$('paypalFundingNote');if(fundingNote)fundingNote.textContent='PayPal payment options are temporarily unavailable.';
+  }
+}
+async function initializePayPalFundingButtons(){
+  if(paypalFundingInitializationAttempted||!paymentsEnabled)return;
+  paypalFundingInitializationAttempted=true;
+  const container=$('paypal-button-container'),fallback=$('checkoutBtn'),fundingNote=$('paypalFundingNote');
+  if(!container)return;
+  try{
+    const config=await api('/api/v1/payments/paypal/public-config');
+    if(!config.enabled||!config.client_id)throw new Error('PayPal public checkout configuration is not ready.');
+    if(!window.paypal||typeof window.paypal.Buttons!=='function'){
+      await new Promise((resolve,reject)=>{
+        const script=document.createElement('script');
+        const params=new URLSearchParams({
+          'client-id':config.client_id,
+          currency:config.currency||'USD',
+          intent:'capture',
+          components:'buttons,funding-eligibility'
+        });
+        script.src='https://www.paypal.com/sdk/js?'+params.toString();
+        script.async=true;
+        const timeout=window.setTimeout(()=>reject(new Error('PayPal checkout SDK timed out.')),15000);
+        script.onload=()=>{window.clearTimeout(timeout);resolve();};
+        script.onerror=()=>{window.clearTimeout(timeout);reject(new Error('PayPal checkout SDK failed to load.'));};
+        document.head.appendChild(script);
+      });
+    }
+    if(!window.paypal||typeof window.paypal.Buttons!=='function'||typeof window.paypal.getFundingSources!=='function')throw new Error('PayPal funding eligibility is unavailable.');
+    const allowedSources=[
+      window.paypal.FUNDING.PAYPAL,
+      window.paypal.FUNDING.CARD,
+      window.paypal.FUNDING.PAYLATER,
+      window.paypal.FUNDING.CREDIT,
+      window.paypal.FUNDING.VENMO
+    ].filter(Boolean);
+    let rendered=0;
+    for(const fundingSource of allowedSources){
+      const button=window.paypal.Buttons({
+        fundingSource,
+        style:{layout:'vertical',shape:'rect',height:46},
+        createOrder:async function(){
+          if(!paymentsEnabled)throw new Error('PayPal checkout is temporarily unavailable.');
+          const signedIn=await loadAccount(true);
+          if(!signedIn){setNavView('settings');throw new Error('Please sign in to AutoOps Hub before starting checkout.');}
+          const order=await api('/api/v1/payments/paypal/order',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({tier:$('tier').value})
+          });
+          if(!order.order_id)throw new Error('PayPal did not return a valid order ID.');
+          return order.order_id;
+        },
+        onApprove:async function(data){
+          if(!data.orderID){notice(billingNotice,'PayPal returned no order ID. Do not retry payment until the order has been checked.','error');return;}
+          try{
+            const result=await api('/api/v1/payments/paypal/capture',{
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({order_id:data.orderID})
+            });
+            window.history.replaceState({},'',window.location.pathname+'#billing');
+            notice(billingNotice,result.message||'Payment verified and account updated.','good');
+            await loadAccount(true);
+            await loadReports();
+          }catch(error){
+            notice(billingNotice,'PayPal approved the order, but AutoOps Hub could not confirm the final result yet. Do not pay again; refresh Billing or contact support.','error');
+            console.error('PayPal order confirmation needs follow-up:',error);
+          }
+        },
+        onCancel:function(){
+          notice(billingNotice,'Checkout was cancelled. No payment was confirmed. You can choose a payment option and try again.','error');
+        },
+        onError:function(error){
+          console.error('PayPal checkout error:',error);
+          notice(billingNotice,'That PayPal payment option could not be completed. Try another available option or use Continue to PayPal.','error');
+        }
+      });
+      if(button.isEligible()){
+        try{
+          await button.render('#paypal-button-container');
+          rendered++;
+        }catch(error){
+          console.warn('Could not render an eligible PayPal funding button:',fundingSource,error);
+        }
+      }
+    }
+    if(!rendered)throw new Error('No PayPal button is currently eligible for this account and browser.');
+    if(fallback)fallback.style.display='none';
+    if(fundingNote)fundingNote.textContent='Choose a method enabled by PayPal for your account and eligible for your location, device and currency. Card and additional wallet/financing options vary by buyer.';
+  }catch(error){
+    console.warn('PayPal funding buttons could not be loaded; retaining hosted checkout fallback.',error);
+    if(fallback)fallback.style.display='block';
+    if(fundingNote)fundingNote.textContent='PayPal could not load the expanded payment choices. You can still continue through PayPal checkout.';
+    notice(billingNotice,'Additional PayPal payment buttons could not be loaded. The Continue to PayPal option remains available.','error');
   }
 }
 function notice(el,message,type){if(!el)return;el.textContent=message;el.className='notice show'+(type?' '+type:'')}
@@ -1230,6 +1328,24 @@ async def _paypal_access_token() -> str:
     except Exception:
         logger.exception("PayPal OAuth failed.")
         raise HTTPException(status_code=503, detail="PayPal authentication failed; verify the credentials belong to the selected environment and REST app.")
+
+@app.get("/api/v1/payments/paypal/public-config")
+async def paypal_public_config(response: Response):
+    """Return only browser-safe PayPal configuration for eligible checkout buttons."""
+    response.headers["Cache-Control"] = "no-store"
+    mode = _paypal_mode()
+    enabled = (
+        _paypal_credentials_configured()
+        and mode != "invalid"
+        and (mode != "live" or PAYPAL_LIVE_ENABLED)
+        and _credential_is_configured(PAYPAL_CLIENT_ID)
+    )
+    if not enabled:
+        return {"enabled": False, "mode": mode, "currency": "USD"}
+    # A PayPal client ID is designed to be public in the JavaScript SDK;
+    # the client secret and webhook ID are never returned.
+    return {"enabled": True, "mode": mode, "currency": "USD", "client_id": PAYPAL_CLIENT_ID}
+
 
 @app.post("/api/v1/payments/paypal/order")
 async def create_paypal_order(request: Request, payload: Dict[str, Any]):
