@@ -37,11 +37,14 @@ class PasswordRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc.exception.status_code, 401)
 
     async def test_recovery_routes_and_ui_are_present(self):
-        import inspect
-        self.assertIn("/api/v1/auth/recover", inspect.getsource(app_module.auth_recover))
-        self.assertIn("/auth/v1/user", inspect.getsource(app_module.auth_update_password))
-        self.assertIn("Forgot password?", app_module.__dict__.get("INDEX_HTML", "") or inspect.getsource(app_module.auth_recover) + "Forgot password?")
-        self.assertIn("Recovery link verified", inspect.getsource(app_module.health_check) + inspect.getsource(app_module.auth_update_password) + open("backend/main.py", encoding="utf-8").read())
+        source = open("backend/main.py", encoding="utf-8").read()
+        route_paths = {getattr(route, "path", "") for route in app_module.app.routes}
+        self.assertIn("/api/v1/auth/recover", route_paths)
+        self.assertIn("/api/v1/auth/password", route_paths)
+        self.assertIn("Forgot password?", source)
+        self.assertIn("Recovery link verified", source)
+        self.assertIn("If an account exists", source)
+
 
 
 if __name__ == "__main__":
