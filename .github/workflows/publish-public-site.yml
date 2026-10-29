@@ -3,7 +3,6 @@ on:
   push:
     branches:
       - autoops-connection-check-20261027
-      - production-paypal-live-20261028
     paths:
       - "public-site/**"
       - ".github/workflows/publish-public-site.yml"
