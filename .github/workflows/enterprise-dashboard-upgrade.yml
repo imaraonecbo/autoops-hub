@@ -47,7 +47,7 @@ jobs:
           Path("dashboard-upgrade.js").write_text(scripts, encoding="utf-8")
           required = [
               'id="diffViewer"', 'id="executionLog"', 'id="view-settings"',
-              'id="metricRows"', 'johnramalfa@gmail.com',
+              'id="metricRows"', 'joramalphaeus@gmail.com',
               'id="paypal-button-container"', 'id="paypalFundingNote"',
               'https://www.paypal.com/sdk/js?', 'window.paypal.FUNDING.CARD',
           ]
