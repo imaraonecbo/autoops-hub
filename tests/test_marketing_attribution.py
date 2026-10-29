@@ -4,6 +4,7 @@ import backend.main as app_module
 
 
 class MarketingAttributionTests(unittest.TestCase):
+    """Keep campaign tags bounded and free of unnecessary personal data."""
     def test_marketing_fields_apply_safe_defaults(self):
         self.assertEqual(
             app_module._marketing_fields({}),
