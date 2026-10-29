@@ -2,7 +2,7 @@ name: Publish public landing page
 on:
   push:
     branches:
-      - production-paypal-live-20261028
+      - autoops-connection-check-20261027
     paths:
       - "public-site/**"
       - ".github/workflows/publish-public-site.yml"
