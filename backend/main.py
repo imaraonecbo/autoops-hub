@@ -1108,8 +1108,10 @@ async function handleAuthCallback(){
    await api('/api/v1/auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:accessToken})});
    if(isRecovery){
      window.history.replaceState({},'',window.location.pathname+'?auth=recovery#settings');
-     setNavView('settings');$('authControls').hidden=true;$('signedInPanel').hidden=true;
-     $('passwordRecoveryPanel').hidden=false;$('forgotPasswordBtn').hidden=true;
+     setNavView('settings');$('signedInPanel').hidden=true;
+     $('email').parentElement.hidden=true;$('password').parentElement.hidden=true;
+     $('signupBtn').hidden=true;$('loginBtn').hidden=true;$('forgotPasswordBtn').hidden=true;
+     $('passwordRecoveryPanel').hidden=false;
      notice(settingsAccountNotice,'Recovery link verified. Choose a new password below.','good');
      return true;
    }
@@ -1119,8 +1121,16 @@ async function handleAuthCallback(){
  }
  if(query.get('auth')==='recovery'){
    setNavView('settings');
-   $('passwordRecoveryPanel').hidden=false;$('forgotPasswordBtn').hidden=true;
-   notice(settingsAccountNotice,'Open the password-reset link from your email to verify your account before choosing a new password.','good');
+   try{
+     await api('/api/v1/auth/me');
+     $('signedInPanel').hidden=true;$('email').parentElement.hidden=true;$('password').parentElement.hidden=true;
+     $('signupBtn').hidden=true;$('loginBtn').hidden=true;$('forgotPasswordBtn').hidden=true;
+     $('passwordRecoveryPanel').hidden=false;
+     notice(settingsAccountNotice,'Your recovery session is still valid. Choose a new password below.','good');
+   }catch(e){
+     $('passwordRecoveryPanel').hidden=true;$('forgotPasswordBtn').hidden=false;
+     notice(settingsAccountNotice,'This reset link is expired or has not been verified. Request a new reset email and open the link from that email.','error');
+   }
    return true;
  }
  if(query.get('auth')==='confirmed'){setNavView('settings');notice(settingsAccountNotice,'Email confirmation completed. Sign in below to continue.','good');window.history.replaceState({},'',window.location.pathname+'#settings');return true}
@@ -1281,6 +1291,8 @@ $('updatePasswordBtn').addEventListener('click',()=>busy($('updatePasswordBtn'),
  if(password!==confirm)throw new Error('The new passwords do not match.');
  const data=await api('/api/v1/auth/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
  $('passwordRecoveryPanel').hidden=true;$('forgotPasswordBtn').hidden=false;$('authControls').hidden=false;
+ $('email').parentElement.hidden=false;$('password').parentElement.hidden=false;
+ $('signupBtn').hidden=false;$('loginBtn').hidden=false;
  setSignedOutUI();$('recoveryPassword').value='';$('recoveryPasswordConfirm').value='';
  notice(settingsAccountNotice,data.message||'Password updated. Sign in again.','good');
 }));
