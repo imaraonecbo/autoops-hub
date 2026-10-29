@@ -46,9 +46,9 @@ jobs:
           scripts = html.split("<script>", 1)[1].split("</script>", 1)[0]
           Path("dashboard-upgrade.js").write_text(scripts, encoding="utf-8")
           required = [
-              'id="diffViewer"', 'id="executionLog"', 'id="view-integrations"',
+              'id="diffViewer"', 'id="executionLog"', 'id="view-settings"',
               'id="metricRows"', 'joramalphaeus@gmail.com',
-              'id="curlSnippet"', 'id="nodeSnippet"', 'id="pythonSnippet"',
+          
           ]
           missing = [needle for needle in required if needle not in html]
           if missing:

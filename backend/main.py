@@ -837,7 +837,6 @@ async def customer_portal():
 <button class="nav-link" data-view="jobs"><span class="ico">▤</span>Jobs &amp; Reports</button>
 <button class="nav-link" data-view="billing"><span class="ico">◇</span>Billing &amp; Plans</button>
 <button class="nav-link" data-view="settings"><span class="ico">⚙</span>Settings</button>
-<button class="nav-link" data-view="integrations"><span class="ico">⌘</span>API &amp; Integrations</button>
 </nav></div>
 <div class="sidebar-spacer"></div>
 <div class="side-status"><div class="status-line"><span class="dot"></span><span>Account security</span></div><p>Your reports are private to your signed-in account.</p></div>
@@ -899,58 +898,6 @@ async def customer_portal():
 </div>
 <div class="workspace" style="margin-top:16px"><section class="card"><h3>Complete PayPal checkout</h3><p class="sub">Sign in to AutoOps Hub first. PayPal will securely ask you to approve the one-time payment before the order is completed.</p><div class="field"><label for="tier">SELECT PLAN</label><select id="tier"><option value="tier_1_51">Basic — $79 USD</option><option value="tier_2_83">Scale — $149 USD</option><option value="tier_3_129">Ultimate — $299 USD</option></select></div><button class="btn block" id="checkoutBtn" disabled>Checking secure checkout…</button><div class="notice" id="billingNotice" role="status" aria-live="polite"></div></section>
 <section class="card"><h3>Billing clarity</h3><p class="sub">The current integration creates a one-time PayPal order. Automatic renewals, invoices, refunds, tax calculation, and a customer-facing payment management portal are not represented as available features yet.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Order is created by the server and associated with the signed-in account.</span></div><div class="security-item"><span class="security-check">✓</span><span>Capture amount and plan are checked before a tier upgrade is applied.</span></div><div class="security-item"><span class="security-check">!</span><span>Payment processing is confirmed by the server before credits are granted; if checkout is unavailable, try again later or contact support.</span></div></div></section></div>
-</section>
-
-<section class="view" id="view-integrations" data-page="integrations">
-<div class="page-head"><div><div class="eyebrow">Developer platform</div><h1>API &amp; integrations</h1><p>Use the existing authenticated processing API with a valid account session or bearer token. Your account credentials remain private.</p></div><span class="tag">Developer workspace</span></div>
-<div class="api-status"><div class="status-mark">i</div><div><strong>Personal API keys are not enabled in the current backend</strong><p>This version has no server-side API-key issuance, hashing, revocation, or scope-enforcement endpoint. A browser-generated <code>sk_live_...</code> would not be secure or accepted by the engine, so no fake key generator is shown. Current API calls authenticate through the existing account session or a valid Supabase bearer JWT.</p></div></div>
-<div class="grid settings-grid">
-<section class="card"><div class="diff-topline"><h3>Processing API</h3><span class="enterprise-tag">Available</span></div><p class="sub">Submit a supported file using the existing authenticated endpoint. Formats: CSV, Excel (.xlsx/.xls), JSON and server logs (.log), subject to plan limits.</p>
-<div class="api-scopes"><span class="api-scope">POST /api/v1/automation/process-file</span><span class="api-scope">GET /api/v1/jobs</span><span class="api-scope">GET /api/v1/jobs/{job_id}</span></div>
-<p class="support-meta">Authentication: <code>Authorization: Bearer &lt;valid access token&gt;</code> or the signed-in browser session cookie. Keep bearer tokens short-lived and out of source control.</p>
-<div class="enterprise-divider"></div><h3>API key management</h3><div class="setting-row"><div><strong>Personal keys &amp; scoped permissions</strong><p>Key creation, secure storage, revocation and server-enforced scopes require a dedicated backend capability. None is advertised as active.</p></div><span class="enterprise-tag muted">Not enabled</span></div><button class="btn secondary" id="requestApiAccessBtn">Request developer API access</button><div class="notice" id="apiAccessNotice" role="status" aria-live="polite"></div></section>
-<section class="card"><div class="diff-topline"><h3>Webhook hub</h3><span class="enterprise-tag muted">Provider webhook only</span></div><p class="sub">Production currently receives PayPal payment events at its configured inbound webhook endpoint.</p><div class="setting-row"><div><strong>Incoming PayPal events</strong><p>Signature verification is enforced by the backend before handling payment events.</p></div><span class="enterprise-tag">Configured</span></div><div class="setting-row"><div><strong>Customer outbound webhooks</strong><p>Configurable destinations, signing secrets, event selection, retries and delivery history are not yet implemented.</p></div><span class="enterprise-tag muted">Not enabled</span></div><p class="support-meta">Do not send payment credentials or webhook secrets in support requests. Configure provider secrets only in the server environment.</p></section>
-</div>
-<div class="section-title"><div><h2>Quickstarts</h2><p>Copy these examples. Replace the token placeholder with a valid short-lived bearer token issued by your authorized sign-in flow.</p></div></div>
-<section class="enterprise-panel"><h3>cURL</h3><p class="sub">Multipart upload using the current processing route.</p><div class="snippet-card"><div class="snippet-head"><strong>Shell · CSV cleanup</strong><button class="btn secondary small" data-copy-target="curlSnippet">Copy</button></div><pre class="snippet-code" id="curlSnippet">export AUTOOPS_ACCESS_TOKEN='REPLACE_WITH_VALID_SHORT_LIVED_ACCESS_TOKEN'
-curl -X POST 'https://autoops-hub-production.onrender.com/api/v1/automation/process-file' \
-  -H "Authorization: Bearer $AUTOOPS_ACCESS_TOKEN" \
-  -F 'file=@sample.csv' \
-  -F 'operation=csv_clean'</pre></div>
-<div class="snippet-card"><div class="snippet-head"><strong>Node.js 20+</strong><button class="btn secondary small" data-copy-target="nodeSnippet">Copy</button></div><pre class="snippet-code" id="nodeSnippet">import fs from 'node:fs';
-
-const token = process.env.AUTOOPS_ACCESS_TOKEN;
-if (!token) throw new Error('Set AUTOOPS_ACCESS_TOKEN first.');
-
-const form = new FormData();
-form.set('file', new Blob([fs.readFileSync('sample.csv')]), 'sample.csv');
-form.set('operation', 'csv_clean');
-
-const response = await fetch(
-  'https://autoops-hub-production.onrender.com/api/v1/automation/process-file',
-  { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: form }
-);
-const result = await response.json();
-if (!response.ok) throw new Error(JSON.stringify(result));
-console.log(result);</pre></div>
-<div class="snippet-card"><div class="snippet-head"><strong>Python · requests</strong><button class="btn secondary small" data-copy-target="pythonSnippet">Copy</button></div><pre class="snippet-code" id="pythonSnippet">import os
-import requests
-
-token = os.environ['AUTOOPS_ACCESS_TOKEN']
-url = 'https://autoops-hub-production.onrender.com/api/v1/automation/process-file'
-
-with open('sample.csv', 'rb') as data_file:
-    response = requests.post(
-        url,
-        headers={'Authorization': 'Bearer ' + token},
-        files={'file': ('sample.csv', data_file, 'text/csv')},
-        data={'operation': 'csv_clean'},
-        timeout=120,
-    )
-response.raise_for_status()
-print(response.json())</pre></div>
-</section>
-<div class="support-meta" style="margin-top:14px">Documentation reflects only the current API routes; key issuance, customer webhook subscriptions, and scope enforcement will appear here only after their server-side implementation is deployed.</div>
 </section>
 
 <section class="view" id="view-settings" data-page="settings">
@@ -1022,7 +969,7 @@ function errorMessage(data,status){if(data&&typeof data.detail==='string')return
 async function api(path,options){const started=performance.now();let response;try{response=await fetch(path,Object.assign({credentials:'same-origin'},options||{}))}catch(e){updateLatencyKpi(path,performance.now()-started);throw e}const latency=performance.now()-started;lastApiLatencyMs=latency;updateLatencyKpi(path,latency);let data={};try{data=await response.json()}catch(e){}if(!response.ok)throw new Error(errorMessage(data,response.status));return data}
 async function busy(button,work){if(!button||button.disabled)return;const old=button.textContent;button.disabled=true;button.textContent='Working…';try{await work()}catch(e){const target=(button.id==='submitJobBtn'||button.id==='refreshBtn')?jobNotice:(button.id==='checkoutBtn'||button.classList.contains('plan-select'))?billingNotice:(button.id==='signupBtn'||button.id==='loginBtn'||button.id==='logoutBtn')?settingsAccountNotice:accountNotice;notice(target,e.message||'Something went wrong. Please try again.','error')}finally{button.disabled=false;button.textContent=old}}
 function credentials(){const email=$('email').value.trim(),password=$('password').value;if(!email||email.indexOf('@')<1)throw new Error('Enter a valid email address first.');if(password.length<10)throw new Error('Use a password of at least 10 characters.');return {email:email,password:password}}
-function setNavView(view){if(!$( 'view-'+view))view='overview';document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));document.querySelectorAll('.nav-link').forEach(el=>el.classList.toggle('active',el.dataset.view===view));const names={overview:'Overview',jobs:'Jobs & Reports',billing:'Billing & Plans',settings:'Settings',integrations:'API & Integrations'};$('crumbTitle').textContent=names[view]||'Overview';if(window.location.hash!=='#'+view)history.replaceState({},'',window.location.pathname+window.location.search+'#'+view);$('sidebar').classList.remove('open');$('navOverlay').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'})}
+function setNavView(view){if(!$( 'view-'+view))view='overview';document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));document.querySelectorAll('.nav-link').forEach(el=>el.classList.toggle('active',el.dataset.view===view));const names={overview:'Overview',jobs:'Jobs & Reports',billing:'Billing & Plans',settings:'Settings'};$('crumbTitle').textContent=names[view]||'Overview';if(window.location.hash!=='#'+view)history.replaceState({},'',window.location.pathname+window.location.search+'#'+view);$('sidebar').classList.remove('open');$('navOverlay').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'})}
 document.querySelectorAll('.nav-link').forEach(button=>button.addEventListener('click',()=>setNavView(button.dataset.view)));
 document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>setNavView(button.dataset.go)));
 $('menuBtn').addEventListener('click',()=>{$('sidebar').classList.toggle('open');$('navOverlay').classList.toggle('open')});
@@ -1144,11 +1091,6 @@ async function renderDiffInspector(file,result){
   }else if(!result)cleanBox.replaceChildren(makeEmptyPreview('Cleaned output appears after the processing request succeeds.'));
   else cleanBox.replaceChildren(makeEmptyPreview('This result did not include a text preview. Open the report details below.'));
 }
-function copySnippet(button){
-  const target=$(button.dataset.copyTarget);if(!target)return;
-  navigator.clipboard.writeText(target.textContent).then(()=>{const prior=button.textContent;button.textContent='Copied';window.setTimeout(()=>{button.textContent=prior},1200)}).catch(()=>{notice($('apiAccessNotice'),'Clipboard access was blocked. Select and copy the snippet manually.','error')});
-}
-
 function showResult(title,value){reportResult.replaceChildren();const heading=document.createElement('h3');heading.textContent=title;heading.style.margin='16px 0 7px';reportResult.append(heading);let printable=value,download=null,format='csv';if(value&&typeof value==='object'){format=value.output_format||'csv';if(value.formatted_result){download=value.formatted_result;printable=JSON.stringify(value.summary||{rows_cleaned:value.rows_cleaned},null,2)+'\n\n'+value.formatted_result}else printable=JSON.stringify(value,null,2)}const pre=document.createElement('pre');pre.className='result-box';pre.textContent=typeof printable==='string'?printable:JSON.stringify(printable,null,2);reportResult.append(pre);if(download!==null){const button=document.createElement('button');button.className='btn secondary small';button.textContent='Download '+(format==='json'?'JSON result':'cleaned CSV');button.style.marginTop='10px';button.addEventListener('click',()=>downloadReport(title,download,format));reportResult.append(button)}}
 async function submitJob(){
  const file=$('csv').files&&$('csv').files[0];if(!file)throw new Error('Choose a supported file before submitting the job.');
@@ -1201,8 +1143,6 @@ $('logoutBtn').addEventListener('click',()=>busy($('logoutBtn'),logout));
 $('checkoutBtn').addEventListener('click',()=>busy($('checkoutBtn'),checkout));
 $('submitJobBtn').addEventListener('click',()=>busy($('submitJobBtn'),submitJob));
 $('csv').addEventListener('change',()=>{const file=$('csv').files&&$('csv').files[0];if(!file)return;lastRawPreviewFile=null;lastRawPreviewText=null;renderDiffInspector(file,null);prepareTerminal(file)});
-document.querySelectorAll('[data-copy-target]').forEach(button=>button.addEventListener('click',()=>copySnippet(button)));
-$('requestApiAccessBtn').addEventListener('click',()=>{const subject='AutoOps Hub developer API access';const body='Please contact me about secure API-key issuance and customer webhook capabilities.';notice($('apiAccessNotice'),'Opening your email client to request secure developer API access.','good');window.location.href='mailto:joramalphaeus@gmail.com?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body)});
 $('refreshBtn').addEventListener('click',()=>busy($('refreshBtn'),loadReports));
 document.querySelectorAll('.plan-select').forEach(button=>button.addEventListener('click',()=>{$('tier').value=button.dataset.tier;document.querySelectorAll('.price-card').forEach(card=>card.classList.toggle('selected-plan',card.dataset.priceTier===button.dataset.tier));document.querySelectorAll('.plan-select').forEach(b=>{b.textContent='Select '+({'tier_1_51':'Basic','tier_2_83':'Scale','tier_3_129':'Ultimate'})[b.dataset.tier];});button.textContent='Selected';notice(billingNotice,$('tier').selectedOptions[0].text+' selected. Continue to PayPal to create a one-time order.','good');$('checkoutBtn').scrollIntoView({behavior:'smooth',block:'center'})}));
 (async()=>{applyPreferences();setNavView((window.location.hash||'#overview').slice(1));try{await configurePaymentMode();if(await handleAuthCallback())return;const query=new URLSearchParams(window.location.search);if(query.get('payment')==='success'&&query.get('token')){setNavView('billing');await captureReturned();return}if(query.get('payment')==='cancelled'){setNavView('billing');notice(billingNotice,'PayPal checkout was cancelled. No payment was captured. You can choose a plan and try again.','error');window.history.replaceState({},'',window.location.pathname+'#billing')}const signed=await loadAccount(true);if(signed)await loadReports();else await loadReports()}catch(e){notice(accountNotice,e.message,'error')}})();
