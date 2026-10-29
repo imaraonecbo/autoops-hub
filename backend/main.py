@@ -1409,6 +1409,7 @@ $('updatePasswordBtn').addEventListener('click',()=>busy($('updatePasswordBtn'),
  if(password.length<10||password.length>256)throw new Error('Use a password between 10 and 256 characters.');
  if(password!==confirm)throw new Error('The new passwords do not match.');
  const data=await api('/api/v1/auth/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+ const cleanRecoveryUrl=new URL(window.location.href);cleanRecoveryUrl.searchParams.delete('auth');cleanRecoveryUrl.hash='settings';window.history.replaceState({},'',cleanRecoveryUrl.pathname+cleanRecoveryUrl.search+cleanRecoveryUrl.hash);
  $('passwordRecoveryPanel').hidden=true;$('forgotPasswordBtn').hidden=false;$('authControls').hidden=false;
  $('email').parentElement.hidden=false;$('password').parentElement.hidden=false;
  $('signupBtn').hidden=false;$('loginBtn').hidden=false;
