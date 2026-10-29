@@ -1,0 +1,45 @@
+name: Weekly growth and availability audit
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 7 * * 1"
+  push:
+    branches:
+      - autoops-connection-check-20261027
+      - production-paypal-live-20261028
+    paths:
+      - "public-site/**"
+      - "scripts/growth_audit.py"
+      - ".github/workflows/weekly-growth-audit.yml"
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: autoops-growth-audit
+  cancel-in-progress: true
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Audit public pages and application health
+        id: audit
+        env:
+          PUBLIC_SITE_URL: https://autoops-hub-public.onrender.com
+          PUBLIC_APP_URL: https://autoops-hub-production.onrender.com
+        run: |
+          set +e
+          python scripts/growth_audit.py | tee growth-audit-report.md
+          result=${PIPESTATUS[0]}
+          echo "exit_code=$result" >> "$GITHUB_OUTPUT"
+          exit "$result"
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoops-growth-audit
+          path: growth-audit-report.md
+          if-no-files-found: warn
+          retention-days: 30

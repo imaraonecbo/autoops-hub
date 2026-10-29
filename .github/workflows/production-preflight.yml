@@ -1,0 +1,58 @@
+name: Production preflight
+
+on:
+  push:
+    branches:
+      - autoops-connection-check-20261027
+  pull_request:
+    branches:
+      - main
+      - autoops-connection-check-20261027
+
+jobs:
+  webhook-security-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Run fail-closed security tests
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+          PAYPAL_CLIENT_ID: ""
+          PAYPAL_CLIENT_SECRET: ""
+          PAYPAL_WEBHOOK_ID: ""
+        run: python -m unittest discover -s tests -v
+
+      - name: Smoke-test deployed staging and Supabase readiness
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoops-hub-staging.onrender.com"
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error "$base/api/v1/health" -o health.json; then
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              echo "Staging health endpoint did not return HTTP 200."
+              exit 1
+            fi
+            sleep 10
+          done
+          python - <<'PY'
+          import json
+          with open("health.json", encoding="utf-8") as f:
+              health = json.load(f)
+          print(json.dumps(health, sort_keys=True))
+          if health.get("status") != "ok" or health.get("database_configured") is not True or health.get("database_reachable") is not True:
+              raise SystemExit("Staging or Supabase readiness check failed.")
+          PY
+          curl --fail --silent --show-error "$base/" -o /dev/null
+          echo "Staging homepage and Supabase-backed health check passed."
