@@ -37,11 +37,11 @@ def fetch(url: str, timeout: int = 25) -> tuple[int, str]:
         return 0, str(exc)
 
 
-def fetch_with_retry(url: str, attempts: int = 5) -> tuple[int, str]:
+def fetch_with_retry(url: str, attempts: int = 5, timeout: int = 25) -> tuple[int, str]:
     """Retry cold starts, throttling, and transient upstream failures."""
     code, body = 0, "not attempted"
     for attempt in range(attempts):
-        code, body = fetch(url, timeout=25)
+        code, body = fetch(url, timeout=timeout)
         if code == 200:
             return code, body
         if code not in (0, 429) and code < 500:
@@ -53,7 +53,7 @@ def fetch_with_retry(url: str, attempts: int = 5) -> tuple[int, str]:
     return code, body
 
 for path in PATHS:
-    code, body = fetch_with_retry(SITE + path)
+    code, body = fetch(SITE + path, timeout=12)
     ok = code == 200
     summary.append(f"- {'PASS' if ok else 'FAIL'} {SITE + path} — HTTP {code}")
     if not ok:
