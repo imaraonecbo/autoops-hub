@@ -48,7 +48,8 @@ jobs:
           required = [
               'id="diffViewer"', 'id="executionLog"', 'id="view-settings"',
               'id="metricRows"', 'joramalphaeus@gmail.com',
-          
+              'id="paypal-button-container"', 'id="paypalFundingNote"',
+              'https://www.paypal.com/sdk/js?', 'window.paypal.FUNDING.CARD',
           ]
           missing = [needle for needle in required if needle not in html]
           if missing:
@@ -74,6 +75,9 @@ jobs:
               ("POST", "/api/v1/automation/clean-csv"),
               ("POST", "/api/v1/automation/process-file"),
               ("GET", "/api/v1/health"),
+              ("GET", "/api/v1/payments/paypal/public-config"),
+              ("POST", "/api/v1/payments/paypal/order"),
+              ("POST", "/api/v1/payments/paypal/capture"),
               ("GET", "/api/v1/jobs"),
               ("GET", "/api/v1/jobs/{job_id}"),
               ("POST", "/api/v1/payments/paypal-webhook"),
