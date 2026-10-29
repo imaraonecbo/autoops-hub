@@ -1042,6 +1042,68 @@ async def auth_me(request: Request):
     profile = supabase.table("profiles").select("current_tier,status").eq("user_id", user["user_id"]).execute()
     return {"user": {"id": user["user_id"], "email": user.get("email")}, "profile": profile.data[0] if profile.data else None}
 
+
+@app.get("/api/v1/marketing/report")
+async def marketing_report(request: Request):
+    """Return aggregate acquisition metrics only to the explicitly configured owner account."""
+    user = await get_authenticated_user(request)
+    admin_email = os.getenv("MARKETING_REPORT_ADMIN_EMAIL", "").strip().lower()
+    if not admin_email:
+        raise HTTPException(status_code=503, detail="Marketing reporting is not enabled until the owner email is configured.")
+    if str(user.get("email", "")).strip().lower() != admin_email:
+        raise HTTPException(status_code=403, detail="Marketing report access is restricted to the configured owner.")
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database is not connected.")
+    try:
+        result = supabase.table("marketing_events").select(
+            "event_name,source,medium,campaign,value,currency,occurred_at"
+        ).order("occurred_at", desc=True).limit(10000).execute()
+        rows = result.data or []
+        by_event: Dict[str, int] = {}
+        by_channel: Dict[str, Dict[str, Any]] = {}
+        revenue = 0.0
+        for row in rows:
+            event_name = str(row.get("event_name") or "unknown")
+            by_event[event_name] = by_event.get(event_name, 0) + 1
+            key = "|".join([
+                str(row.get("source") or "direct"),
+                str(row.get("medium") or "none"),
+                str(row.get("campaign") or "unattributed"),
+            ])
+            channel = by_channel.setdefault(key, {
+                "source": row.get("source") or "direct",
+                "medium": row.get("medium") or "none",
+                "campaign": row.get("campaign") or "unattributed",
+                "signups": 0,
+                "checkouts": 0,
+                "purchases": 0,
+                "revenue_usd": 0.0,
+            })
+            if event_name == "signup_completed":
+                channel["signups"] += 1
+            elif event_name == "checkout_started":
+                channel["checkouts"] += 1
+            elif event_name == "purchase_completed":
+                channel["purchases"] += 1
+                revenue += float(row.get("value") or 0)
+                channel["revenue_usd"] += float(row.get("value") or 0)
+        for channel in by_channel.values():
+            channel["revenue_usd"] = round(channel["revenue_usd"], 2)
+        return {
+            "events_scanned": len(rows),
+            "truncated": len(rows) == 10000,
+            "events_by_name": by_event,
+            "revenue_usd": round(revenue, 2),
+            "channels": sorted(by_channel.values(), key=lambda item: (item["purchases"], item["signups"]), reverse=True),
+            "note": "Counts include events recorded after attribution tracking was deployed; this is not retroactive and does not include social-platform impressions.",
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Owner marketing report query failed.")
+        raise HTTPException(status_code=503, detail="Marketing report data is temporarily unavailable.")
+
+
 async def _paypal_access_token() -> str:
     _assert_paypal_runtime_ready()
     try:
