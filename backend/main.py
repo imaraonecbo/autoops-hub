@@ -764,6 +764,67 @@ async def customer_portal():
 @media(max-width:1080px){.app{grid-template-columns:218px minmax(0,1fr)}.main{padding:0 22px 30px}.hero{grid-template-columns:minmax(0,1fr)}.hero-aside{min-height:190px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.service-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.app{display:block}.sidebar{position:fixed;left:0;top:0;bottom:0;width:255px;height:100dvh;transform:translateX(-105%);transition:transform .2s;box-shadow:15px 0 50px #0007}.sidebar.open{transform:translateX(0)}.main{padding:0 16px 28px}.topbar{height:66px}.mobile-menu{display:block}.breadcrumbs{display:none}.top-actions{gap:8px}.user-detail{display:none}.user-chip{padding-left:8px}.page-head{align-items:flex-start;flex-direction:column}.page-head .btn{align-self:stretch}.service-grid,.flow-grid,.workspace,.settings-grid,.pricing{grid-template-columns:1fr}.hero-copy{padding:23px;min-height:245px}.hero-copy h2{font-size:34px}.hero-aside{min-height:170px}.metrics{gap:9px}.metric{padding:14px}.metric-value{font-size:23px}.section-title{align-items:flex-start;flex-direction:column}.price-card{min-height:auto}.nav-overlay{display:none;position:fixed;inset:0;background:#02060bbb;z-index:19}.nav-overlay.open{display:block}}
 @media(max-width:410px){.main{padding-left:12px;padding-right:12px}.env-pill{font-size:9px;padding:6px 8px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-copy h2{font-size:30px}.metric-value{font-size:21px}}
+
+/* Additive enterprise UI components */
+.telemetry-metrics{grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 8px}
+.telemetry-note{font-size:11px;line-height:1.65;color:#8196b1;margin:8px 2px 24px}
+.metric-live-value{font-variant-numeric:tabular-nums;letter-spacing:-.04em}
+.enterprise-panel{border:1px solid #283a52;background:linear-gradient(155deg,#111e30dd,#0b1422f2);border-radius:16px;padding:18px;min-width:0;box-shadow:inset 0 1px 0 #ffffff05}
+.enterprise-panel h3{margin:0 0 6px;font-size:14px;letter-spacing:-.02em}
+.enterprise-panel .sub{margin:0 0 14px}
+.diff-wrap{margin-top:17px;display:grid;gap:12px}
+.diff-topline{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.diff-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.diff-side{border:1px solid #293a50;border-radius:13px;overflow:hidden;background:#0a1320;min-width:0}
+.diff-side-head{padding:11px 13px;display:flex;justify-content:space-between;align-items:center;gap:9px;border-bottom:1px solid #25364b}
+.diff-side-head strong{font-size:12px;letter-spacing:.02em}
+.diff-side.raw .diff-side-head{background:#2b1820;color:#ffc5cc}
+.diff-side.clean .diff-side-head{background:#112a25;color:#aaf5d7}
+.diff-badge{font-size:10px;border:1px solid #ffffff20;border-radius:100px;padding:4px 8px;white-space:nowrap}
+.diff-content{padding:10px;min-height:140px;max-height:340px;overflow:auto}
+.diff-empty{color:#8195ae;font-size:12px;line-height:1.7;padding:12px}
+.diff-table{border-collapse:separate;border-spacing:0;width:100%;font-size:11px;white-space:nowrap}
+.diff-table th,.diff-table td{padding:7px 9px;border-right:1px solid #223149;border-bottom:1px solid #223149;text-align:left;max-width:210px;overflow:hidden;text-overflow:ellipsis}
+.diff-table th{position:sticky;top:0;background:#18263a;color:#dbe9fc;font-weight:750}
+.diff-table td{color:#b7c5d8;background:#0d1828}
+.diff-table td.diff-bad{background:#351b24;color:#ffc4cd;box-shadow:inset 0 0 0 1px #7a3747}
+.diff-table td.diff-good{background:#123027;color:#b2f6d7;box-shadow:inset 0 0 0 1px #246550}
+.diff-pre{margin:0;padding:10px;background:#0a1320;color:#c5d5e9;font:11px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow:auto;max-height:300px;border-radius:8px}
+.diff-line-bad{display:block;background:#381d25;color:#ffc0ca}
+.diff-line-good{display:block;background:#123027;color:#b8f4d9}
+.terminal-wrap{margin-top:17px;border:1px solid #263850;background:#07101b;border-radius:14px;overflow:hidden;box-shadow:0 12px 35px #0002}
+.terminal-head{padding:11px 13px;background:linear-gradient(90deg,#111f32,#0b1524);display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #24354b}
+.terminal-title{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:750}
+.terminal-lights{display:flex;gap:4px}.terminal-lights i{display:block;width:7px;height:7px;border-radius:50%;background:#61748d}.terminal-lights i:first-child{background:#fb7185}.terminal-lights i:nth-child(2){background:#f7c76b}.terminal-lights i:nth-child(3){background:#4adea2}
+.terminal-state{font-size:10px;border-radius:100px;border:1px solid #34506a;padding:4px 8px;color:#acc0da}
+.terminal-state.running{color:#bcd7ff;border-color:#4a6290;background:#18243a}.terminal-state.success{color:#9af2c4;border-color:#28674d;background:#102b22}.terminal-state.failed{color:#ffbdc5;border-color:#7d3848;background:#321921}
+.execution-stepper{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:12px 13px 3px}
+.exec-step{font-size:10px;color:#647b97;border:1px solid #203147;border-radius:9px;padding:8px 9px;background:#0b1624;display:flex;align-items:center;gap:7px}
+.exec-step .step-number{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1px solid #3a4e67;color:#95abc7;font-weight:750;flex-shrink:0}
+.exec-step.active{border-color:#4d6ea0;color:#d8e7ff;background:#142238}.exec-step.active .step-number{background:#233b5b;border-color:#6e96ce;color:#fff}
+.exec-step.done{border-color:#225744;color:#9fe9c9;background:#10271f}.exec-step.done .step-number{border-color:#347e61;color:#c3ffe2;background:#164431}
+.execution-log{margin:0;padding:13px 15px 15px;min-height:105px;max-height:205px;overflow:auto;color:#99e9c6;font:11px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.terminal-foot{font-size:10px;color:#7187a3;padding:0 14px 12px;line-height:1.6}
+.api-status{display:flex;align-items:flex-start;gap:10px;border:1px solid #28425a;background:#0e1d2e;border-radius:12px;padding:13px;margin-bottom:15px}
+.api-status .status-mark{display:grid;place-items:center;width:26px;height:26px;flex-shrink:0;border-radius:8px;background:#1e344d;color:#b8d7ff;font-weight:900}
+.api-status strong{display:block;color:#e4effe;font-size:12px;margin-bottom:4px}
+.api-status p{margin:0;color:#94a8c0;font-size:11px;line-height:1.65}
+.api-scopes{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}
+.api-scope{font:10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;border:1px solid #2c3e55;border-radius:7px;background:#0a1523;color:#aebfd5;padding:6px 8px}
+.snippet-card{border:1px solid #2a3b52;border-radius:13px;overflow:hidden;background:#080f19;margin-top:12px}
+.snippet-head{display:flex;align-items:center;justify-content:space-between;gap:9px;padding:10px 12px;background:#111d2d;border-bottom:1px solid #28394e}
+.snippet-head strong{font-size:11px;color:#dbe8f9}
+.snippet-code{display:block;overflow:auto;max-height:320px;padding:13px;color:#b8d6f7;font:11px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}
+.support-card{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.support-email{font-size:15px;font-weight:750;color:#b9d5ff;overflow-wrap:anywhere}
+.support-meta{font-size:11px;line-height:1.7;color:#8ca2bd}
+.enterprise-divider{height:1px;background:linear-gradient(90deg,transparent,#2b4059,transparent);margin:15px 0}
+.enterprise-tag{display:inline-flex;align-items:center;gap:6px;border:1px solid #315442;background:#10271f;color:#a8f4d0;border-radius:100px;font-size:10px;font-weight:750;padding:5px 9px}
+.enterprise-tag.muted{border-color:#36465d;background:#111d2d;color:#a6bad3}
+@media(max-width:1120px){.telemetry-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.diff-grid{grid-template-columns:1fr}}
+@media(max-width:760px){.telemetry-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.execution-stepper{grid-template-columns:1fr}.diff-content{max-height:260px}.support-card{display:block}.support-card .btn{margin-top:12px}}
+@media(max-width:430px){.telemetry-metrics{grid-template-columns:1fr}.enterprise-panel{padding:13px}.execution-log{font-size:10px}}
+
 </style>
 </head>
 <body>
@@ -776,6 +837,7 @@ async def customer_portal():
 <button class="nav-link" data-view="jobs"><span class="ico">▤</span>Jobs &amp; Reports</button>
 <button class="nav-link" data-view="billing"><span class="ico">◇</span>Billing &amp; Plans</button>
 <button class="nav-link" data-view="settings"><span class="ico">⚙</span>Settings</button>
+<button class="nav-link" data-view="integrations"><span class="ico">⌘</span>API &amp; Integrations</button>
 </nav></div>
 <div class="sidebar-spacer"></div>
 <div class="side-status"><div class="status-line"><span class="dot"></span><span>Account security</span></div><p>Your reports are private to your signed-in account.</p></div>
@@ -792,6 +854,12 @@ async def customer_portal():
 <article class="metric"><div class="metric-label">Current access</div><div class="metric-row"><div><div class="metric-value" id="metricTier" style="font-size:20px">Guest</div><div class="metric-note" id="metricTierNote">Sign in to view your tier</div></div><div class="metric-symbol">◇</div></div></article>
 <article class="metric"><div class="metric-label">Latest report</div><div class="metric-row"><div><div class="metric-value" id="metricLatest" style="font-size:16px">—</div><div class="metric-note" id="metricLatestNote">No job completed yet</div></div><div class="metric-symbol">↗</div></div></article>
  </div>
+<div class="grid metrics telemetry-metrics" aria-label="Live workspace telemetry">
+<article class="metric"><div class="metric-label">Rows processed · recent reports</div><div class="metric-row"><div><div class="metric-value metric-live-value" id="metricRows">—</div><div class="metric-note" id="metricRowsNote">Sign in to summarize recent reports</div></div><div class="metric-symbol">▦</div></div></article>
+<article class="metric"><div class="metric-label">Estimated time saved</div><div class="metric-row"><div><div class="metric-value metric-live-value" id="metricHours">—</div><div class="metric-note" id="metricHoursNote">Estimate, not a measured result</div></div><div class="metric-symbol">◷</div></div></article>
+<article class="metric"><div class="metric-label">Latest API response</div><div class="metric-row"><div><div class="metric-value metric-live-value" id="metricLatency">—</div><div class="metric-note" id="metricLatencyNote">Waiting for the first request</div></div><div class="metric-symbol">⌁</div></div></article>
+</div>
+<div class="telemetry-note">Telemetry summarizes recent account reports. Time saved is an estimate (2 minutes per 1,000 rows), not a measured business outcome. API latency is observed in this browser.</div>
 <div class="section-title"><div><h2>Capabilities in this workspace</h2><p>Features customers can use in the current CSV cleanup service.</p></div><button class="btn ghost small" data-go="billing">View plan limits</button></div>
 <div class="grid service-grid">
 <article class="service"><div class="service-icon">↔</div><h3>Normalize headers and values</h3><p>Clean header spacing, lowercase column labels, replace header spaces with underscores, and trim cell whitespace.</p><div class="meta">CORE CSV CLEANUP</div></article>
@@ -804,7 +872,21 @@ async def customer_portal():
 </section>
 <section class="view" id="view-jobs" data-page="jobs">
 <div class="page-head"><div><div class="eyebrow">Execution centre</div><h1>Jobs &amp; reports</h1><p>Submit CSVs, Excel workbooks, JSON payloads, server logs, merchant catalogs, order exports, or user identity exports according to your selected tier. Retrieve completed results from your account history.</p></div><span class="tag">Multi-format engine</span></div>
-<div class="workspace"><section class="card"><h3>Submit a new job</h3><p class="sub">Choose a supported file and workload. Basic supports CSV cleanup; Scale adds Excel, JSON and logs; Ultimate adds merchant, order and identity workloads.</p><div class="field"><label for="csv">INPUT FILE (.CSV, .XLSX, .XLS, .JSON, .LOG)</label><input id="csv" type="file" accept=".csv,.xlsx,.xls,.json,.log,text/csv,application/json,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"></div><div class="field"><label for="operation">PROCESSING WORKLOAD</label><select id="operation"><option value="auto">Auto-detect by file type</option><option value="csv_clean">CSV header and whitespace cleanup</option><option value="excel_consolidate">Excel workbook consolidation (.xlsx/.xls)</option><option value="json_clean">JSON payload formatting and anomaly scan</option><option value="json_filter_anomalies">Filter JSON event arrays to error/anomaly records (Scale+)</option><option value="log_analyze">Server log and stack-trace analysis</option><option value="catalog_normalize">Merchant product catalog normalization (Ultimate)</option><option value="order_normalize">E-commerce order export normalization (Ultimate)</option><option value="identity_sanitize">User export email and duplicate identity sanitization (Ultimate)</option></select></div><button class="btn block" id="submitJobBtn">Process file &amp; generate report →</button><div class="notice" id="jobNotice" role="status" aria-live="polite"></div><div style="height:1px;background:var(--line);margin:20px 0"></div><h3>Supported processing</h3><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>CSV header and whitespace cleanup remains available.</span></div><div class="security-item"><span class="security-check">✓</span><span>Scale: multi-sheet workbook consolidation, JSON formatting, log parsing, deduplication, and missing-value analysis.</span></div><div class="security-item"><span class="security-check">✓</span><span>Ultimate: catalog, order and user export normalization with quality flags.</span></div></div></section>
+<div class="workspace"><section class="card"><h3>Submit a new job</h3><p class="sub">Choose a supported file and workload. Basic supports CSV cleanup; Scale adds Excel, JSON and logs; Ultimate adds merchant, order and identity workloads.</p><div class="field"><label for="csv">INPUT FILE (.CSV, .XLSX, .XLS, .JSON, .LOG)</label><input id="csv" type="file" accept=".csv,.xlsx,.xls,.json,.log,text/csv,application/json,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"></div><div class="field"><label for="operation">PROCESSING WORKLOAD</label><select id="operation"><option value="auto">Auto-detect by file type</option><option value="csv_clean">CSV header and whitespace cleanup</option><option value="excel_consolidate">Excel workbook consolidation (.xlsx/.xls)</option><option value="json_clean">JSON payload formatting and anomaly scan</option><option value="json_filter_anomalies">Filter JSON event arrays to error/anomaly records (Scale+)</option><option value="log_analyze">Server log and stack-trace analysis</option><option value="catalog_normalize">Merchant product catalog normalization (Ultimate)</option><option value="order_normalize">E-commerce order export normalization (Ultimate)</option><option value="identity_sanitize">User export email and duplicate identity sanitization (Ultimate)</option></select></div><button class="btn block" id="submitJobBtn">Process file &amp; generate report →</button><div class="notice" id="jobNotice" role="status" aria-live="polite"></div>
+<section class="terminal-wrap" aria-label="Client-observed execution trace">
+<div class="terminal-head"><div class="terminal-title"><span class="terminal-lights"><i></i><i></i><i></i></span><span>Execution terminal</span></div><span class="terminal-state" id="terminalState">Idle</span></div>
+<div class="execution-stepper"><div class="exec-step" id="stepUpload"><span class="step-number">1</span> Upload &amp; validate</div><div class="exec-step" id="stepProcess"><span class="step-number">2</span> Engine response</div><div class="exec-step" id="stepComplete"><span class="step-number">3</span> Result ready</div></div>
+<pre class="execution-log" id="executionLog" aria-live="polite">[ready] Choose a file to prepare an execution trace.
+[info] This terminal shows client-observed milestones; the backend does not currently stream internal worker events.</pre>
+<div class="terminal-foot">No fabricated server progress. Durations are measured from this browser's request/response timings.</div>
+</section>
+<section class="enterprise-panel diff-wrap" id="diffViewer" aria-label="Before and after data inspector">
+<div class="diff-topline"><div><h3>Before / after inspector</h3><p class="sub">Raw values are compared with the actual output returned by the engine.</p></div><span class="enterprise-tag muted" id="diffState">Waiting for a file</span></div>
+<div class="diff-grid"><div class="diff-side raw"><div class="diff-side-head"><strong>RAW INPUT PREVIEW</strong><span class="diff-badge">Needs review</span></div><div class="diff-content" id="diffRaw"><div class="diff-empty">Choose a file to preview its first rows or lines.</div></div></div>
+<div class="diff-side clean"><div class="diff-side-head"><strong>CLEANED OUTPUT PREVIEW</strong><span class="diff-badge">Engine result</span></div><div class="diff-content" id="diffClean"><div class="diff-empty">The cleaned result will appear after processing completes.</div></div></div></div>
+<div class="support-meta" id="diffFootnote">Preview is limited to a small sample; downloaded output remains the full server result.</div>
+</section>
+<div style="height:1px;background:var(--line);margin:20px 0"></div><h3>Supported processing</h3><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>CSV header and whitespace cleanup remains available.</span></div><div class="security-item"><span class="security-check">✓</span><span>Scale: multi-sheet workbook consolidation, JSON formatting, log parsing, deduplication, and missing-value analysis.</span></div><div class="security-item"><span class="security-check">✓</span><span>Ultimate: catalog, order and user export normalization with quality flags.</span></div></div></section>
 <section class="card"><div class="section-title" style="margin:0 0 13px"><div><h3>Report history</h3><p>Only reports belonging to your account are shown.</p></div><button class="btn secondary small" id="refreshBtn">↻ Refresh</button></div><div id="reportList" class="report-empty">Sign in to load your private report history.</div><div id="reportResult"></div></section></div>
 </section>
 <section class="view" id="view-billing" data-page="billing">
@@ -818,6 +900,59 @@ async def customer_portal():
 <div class="workspace" style="margin-top:16px"><section class="card"><h3>Complete PayPal checkout</h3><p class="sub">Sign in to AutoOps Hub first. PayPal will securely ask you to approve the one-time payment before the order is completed.</p><div class="field"><label for="tier">SELECT PLAN</label><select id="tier"><option value="tier_1_51">Basic — $79 USD</option><option value="tier_2_83">Scale — $149 USD</option><option value="tier_3_129">Ultimate — $299 USD</option></select></div><button class="btn block" id="checkoutBtn" disabled>Checking secure checkout…</button><div class="notice" id="billingNotice" role="status" aria-live="polite"></div></section>
 <section class="card"><h3>Billing clarity</h3><p class="sub">The current integration creates a one-time PayPal order. Automatic renewals, invoices, refunds, tax calculation, and a customer-facing payment management portal are not represented as available features yet.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Order is created by the server and associated with the signed-in account.</span></div><div class="security-item"><span class="security-check">✓</span><span>Capture amount and plan are checked before a tier upgrade is applied.</span></div><div class="security-item"><span class="security-check">!</span><span>Payment processing is confirmed by the server before credits are granted; if checkout is unavailable, try again later or contact support.</span></div></div></section></div>
 </section>
+
+<section class="view" id="view-integrations" data-page="integrations">
+<div class="page-head"><div><div class="eyebrow">Developer platform</div><h1>API &amp; integrations</h1><p>Use the existing authenticated processing API with a valid account session or bearer token. Your account credentials remain private.</p></div><span class="tag">Developer workspace</span></div>
+<div class="api-status"><div class="status-mark">i</div><div><strong>Personal API keys are not enabled in the current backend</strong><p>This version has no server-side API-key issuance, hashing, revocation, or scope-enforcement endpoint. A browser-generated <code>sk_live_...</code> would not be secure or accepted by the engine, so no fake key generator is shown. Current API calls authenticate through the existing account session or a valid Supabase bearer JWT.</p></div></div>
+<div class="grid settings-grid">
+<section class="card"><div class="diff-topline"><h3>Processing API</h3><span class="enterprise-tag">Available</span></div><p class="sub">Submit a supported file using the existing authenticated endpoint. Formats: CSV, Excel (.xlsx/.xls), JSON and server logs (.log), subject to plan limits.</p>
+<div class="api-scopes"><span class="api-scope">POST /api/v1/automation/process-file</span><span class="api-scope">GET /api/v1/jobs</span><span class="api-scope">GET /api/v1/jobs/{job_id}</span></div>
+<p class="support-meta">Authentication: <code>Authorization: Bearer &lt;valid access token&gt;</code> or the signed-in browser session cookie. Keep bearer tokens short-lived and out of source control.</p>
+<div class="enterprise-divider"></div><h3>API key management</h3><div class="setting-row"><div><strong>Personal keys &amp; scoped permissions</strong><p>Key creation, secure storage, revocation and server-enforced scopes require a dedicated backend capability. None is advertised as active.</p></div><span class="enterprise-tag muted">Not enabled</span></div><button class="btn secondary" id="requestApiAccessBtn">Request developer API access</button><div class="notice" id="apiAccessNotice" role="status" aria-live="polite"></div></section>
+<section class="card"><div class="diff-topline"><h3>Webhook hub</h3><span class="enterprise-tag muted">Provider webhook only</span></div><p class="sub">Production currently receives PayPal payment events at its configured inbound webhook endpoint.</p><div class="setting-row"><div><strong>Incoming PayPal events</strong><p>Signature verification is enforced by the backend before handling payment events.</p></div><span class="enterprise-tag">Configured</span></div><div class="setting-row"><div><strong>Customer outbound webhooks</strong><p>Configurable destinations, signing secrets, event selection, retries and delivery history are not yet implemented.</p></div><span class="enterprise-tag muted">Not enabled</span></div><p class="support-meta">Do not send payment credentials or webhook secrets in support requests. Configure provider secrets only in the server environment.</p></section>
+</div>
+<div class="section-title"><div><h2>Quickstarts</h2><p>Copy these examples. Replace the token placeholder with a valid short-lived bearer token issued by your authorized sign-in flow.</p></div></div>
+<section class="enterprise-panel"><h3>cURL</h3><p class="sub">Multipart upload using the current processing route.</p><div class="snippet-card"><div class="snippet-head"><strong>Shell · CSV cleanup</strong><button class="btn secondary small" data-copy-target="curlSnippet">Copy</button></div><pre class="snippet-code" id="curlSnippet">export AUTOOPS_ACCESS_TOKEN='REPLACE_WITH_VALID_SHORT_LIVED_ACCESS_TOKEN'
+curl -X POST 'https://autoops-hub-production.onrender.com/api/v1/automation/process-file' \
+  -H "Authorization: Bearer $AUTOOPS_ACCESS_TOKEN" \
+  -F 'file=@sample.csv' \
+  -F 'operation=csv_clean'</pre></div>
+<div class="snippet-card"><div class="snippet-head"><strong>Node.js 20+</strong><button class="btn secondary small" data-copy-target="nodeSnippet">Copy</button></div><pre class="snippet-code" id="nodeSnippet">import fs from 'node:fs';
+
+const token = process.env.AUTOOPS_ACCESS_TOKEN;
+if (!token) throw new Error('Set AUTOOPS_ACCESS_TOKEN first.');
+
+const form = new FormData();
+form.set('file', new Blob([fs.readFileSync('sample.csv')]), 'sample.csv');
+form.set('operation', 'csv_clean');
+
+const response = await fetch(
+  'https://autoops-hub-production.onrender.com/api/v1/automation/process-file',
+  { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: form }
+);
+const result = await response.json();
+if (!response.ok) throw new Error(JSON.stringify(result));
+console.log(result);</pre></div>
+<div class="snippet-card"><div class="snippet-head"><strong>Python · requests</strong><button class="btn secondary small" data-copy-target="pythonSnippet">Copy</button></div><pre class="snippet-code" id="pythonSnippet">import os
+import requests
+
+token = os.environ['AUTOOPS_ACCESS_TOKEN']
+url = 'https://autoops-hub-production.onrender.com/api/v1/automation/process-file'
+
+with open('sample.csv', 'rb') as data_file:
+    response = requests.post(
+        url,
+        headers={'Authorization': 'Bearer ' + token},
+        files={'file': ('sample.csv', data_file, 'text/csv')},
+        data={'operation': 'csv_clean'},
+        timeout=120,
+    )
+response.raise_for_status()
+print(response.json())</pre></div>
+</section>
+<div class="support-meta" style="margin-top:14px">Documentation reflects only the current API routes; key issuance, customer webhook subscriptions, and scope enforcement will appear here only after their server-side implementation is deployed.</div>
+</section>
+
 <section class="view" id="view-settings" data-page="settings">
 <div class="page-head"><div><div class="eyebrow">Workspace control</div><h1>Settings</h1><p>Manage your current session and workspace preferences. Payment credentials are intentionally kept on the server rather than exposed in browser settings.</p></div><span class="tag">Account preferences</span></div>
 <div class="grid settings-grid">
@@ -832,8 +967,9 @@ async def customer_portal():
 
 <section class="card"><h3>Security &amp; privacy</h3><p class="sub">Controls that protect customer accounts and report history.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Account endpoints verify the Supabase session token server-side.</span></div><div class="security-item"><span class="security-check">✓</span><span>Report queries are scoped to the signed-in user's account.</span></div><div class="security-item"><span class="security-check">✓</span><span>PayPal client secrets belong in Render environment variables, never HTML, JavaScript, or public repository files.</span></div></div></section>
 </div>
+<section class="enterprise-panel support-card"><div><div class="eyebrow">Human support</div><h3>Need a hand with your workspace?</h3><p class="support-meta">Contact support for account access, job failures, payment questions or developer-access requests. Never email passwords, API tokens, PayPal secrets, or webhook signing credentials.</p><div style="margin-top:10px"><a class="support-email" href="mailto:joramalphaeus@gmail.com?subject=AutoOps%20Hub%20Support">joramalphaeus@gmail.com</a></div></div><a class="btn secondary" href="mailto:joramalphaeus@gmail.com?subject=AutoOps%20Hub%20Support">Contact support →</a></section>
 </section>
-<footer class="footer"><span>AutoOps Hub · Customer workspace</span><span>One-time checkout only · payment capture is verified server-side before account credits are granted.</span></footer>
+<footer class="footer"><span>AutoOps Hub · Customer workspace</span><span>Support: <a href="mailto:joramalphaeus@gmail.com">joramalphaeus@gmail.com</a> · One-time checkout verified server-side.</span></footer>
 </main>
 </div>
 <script>
@@ -842,7 +978,7 @@ async def customer_portal():
 const $=id=>document.getElementById(id);
 const accountNotice=$('accountNotice'),jobNotice=$('jobNotice'),reportList=$('reportList'),reportResult=$('reportResult'),billingNotice=$('billingNotice'),settingsAccountNotice=$('settingsAccountNotice');
 const authControls=$('authControls'),signedInPanel=$('signedInPanel'),signedInLabel=$('signedInLabel');
-let currentUser=null,currentProfile=null,reportsCache=[],paymentMode='sandbox',paymentsEnabled=false;
+let currentUser=null,currentProfile=null,reportsCache=[],paymentMode='sandbox',paymentsEnabled=false,lastApiLatencyMs=null,lastExecutionStarted=0,lastRawPreviewFile=null,lastRawPreviewText=null;
 async function configurePaymentMode(){
   try{
     const health=await api('/api/v1/health');
@@ -883,10 +1019,10 @@ async function configurePaymentMode(){
 }
 function notice(el,message,type){if(!el)return;el.textContent=message;el.className='notice show'+(type?' '+type:'')}
 function errorMessage(data,status){if(data&&typeof data.detail==='string')return data.detail;if(data&&data.detail&&typeof data.detail==='object')return data.detail.message||JSON.stringify(data.detail);if(data&&data.message)return data.message;return 'Request failed ('+status+'). Please try again.'}
-async function api(path,options){const response=await fetch(path,Object.assign({credentials:'same-origin'},options||{}));let data={};try{data=await response.json()}catch(e){}if(!response.ok)throw new Error(errorMessage(data,response.status));return data}
+async function api(path,options){const started=performance.now();let response;try{response=await fetch(path,Object.assign({credentials:'same-origin'},options||{}))}catch(e){updateLatencyKpi(path,performance.now()-started);throw e}const latency=performance.now()-started;lastApiLatencyMs=latency;updateLatencyKpi(path,latency);let data={};try{data=await response.json()}catch(e){}if(!response.ok)throw new Error(errorMessage(data,response.status));return data}
 async function busy(button,work){if(!button||button.disabled)return;const old=button.textContent;button.disabled=true;button.textContent='Working…';try{await work()}catch(e){const target=(button.id==='submitJobBtn'||button.id==='refreshBtn')?jobNotice:(button.id==='checkoutBtn'||button.classList.contains('plan-select'))?billingNotice:(button.id==='signupBtn'||button.id==='loginBtn'||button.id==='logoutBtn')?settingsAccountNotice:accountNotice;notice(target,e.message||'Something went wrong. Please try again.','error')}finally{button.disabled=false;button.textContent=old}}
 function credentials(){const email=$('email').value.trim(),password=$('password').value;if(!email||email.indexOf('@')<1)throw new Error('Enter a valid email address first.');if(password.length<10)throw new Error('Use a password of at least 10 characters.');return {email:email,password:password}}
-function setNavView(view){if(!$( 'view-'+view))view='overview';document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));document.querySelectorAll('.nav-link').forEach(el=>el.classList.toggle('active',el.dataset.view===view));const names={overview:'Overview',jobs:'Jobs & Reports',billing:'Billing & Plans',settings:'Settings'};$('crumbTitle').textContent=names[view]||'Overview';if(window.location.hash!=='#'+view)history.replaceState({},'',window.location.pathname+window.location.search+'#'+view);$('sidebar').classList.remove('open');$('navOverlay').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'})}
+function setNavView(view){if(!$( 'view-'+view))view='overview';document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));document.querySelectorAll('.nav-link').forEach(el=>el.classList.toggle('active',el.dataset.view===view));const names={overview:'Overview',jobs:'Jobs & Reports',billing:'Billing & Plans',settings:'Settings',integrations:'API & Integrations'};$('crumbTitle').textContent=names[view]||'Overview';if(window.location.hash!=='#'+view)history.replaceState({},'',window.location.pathname+window.location.search+'#'+view);$('sidebar').classList.remove('open');$('navOverlay').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'})}
 document.querySelectorAll('.nav-link').forEach(button=>button.addEventListener('click',()=>setNavView(button.dataset.view)));
 document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>setNavView(button.dataset.go)));
 $('menuBtn').addEventListener('click',()=>{$('sidebar').classList.toggle('open');$('navOverlay').classList.toggle('open')});
@@ -914,9 +1050,148 @@ async function checkout(){
 async function captureReturned(){const orderId=new URLSearchParams(window.location.search).get('token');if(!orderId)throw new Error('No PayPal order token was found. Start checkout and return here after approving the PayPal order.');const data=await api('/api/v1/payments/paypal/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:orderId})});window.history.replaceState({},'',window.location.pathname+'#billing');notice(billingNotice,data.message||'Payment verification completed.','good');await loadAccount(true);await loadReports()}
 async function handleAuthCallback(){const hash=new URLSearchParams(window.location.hash.replace(/^#/,''));const query=new URLSearchParams(window.location.search);const accessToken=hash.get('access_token')||query.get('access_token');const authError=hash.get('error_description')||query.get('error_description')||hash.get('error')||query.get('error');if(authError)throw new Error('Email confirmation did not complete: '+authError.replace(/\+/g,' '));if(accessToken){const data=await api('/api/v1/auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:accessToken})});window.history.replaceState({},'',window.location.pathname+'#overview');notice(accountNotice,data.message||'Email confirmed. You are signed in.','good');await loadAccount(true);await loadReports();return true}if(query.get('auth')==='confirmed'){setNavView('settings');notice(settingsAccountNotice,'Email confirmation completed. Sign in below to continue.','good');window.history.replaceState({},'',window.location.pathname+'#settings');return true}return false}
 function downloadReport(name,value,format){const ext=(format||'csv').toLowerCase()==='json'?'json':'csv';const blob=new Blob([value],{type:ext==='json'?'application/json;charset=utf-8':'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(name||'autoops-report').replace(/[^a-z0-9_.-]/gi,'_')+'.'+ext;document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}
+
+function updateLatencyKpi(path,milliseconds){
+  const value=$('metricLatency'),note=$('metricLatencyNote');
+  if(value)value.textContent=Math.round(milliseconds)+' ms';
+  if(note)note.textContent='Browser-observed · '+String(path).split('?')[0].slice(0,38);
+}
+function appendTerminal(message,type){
+  const log=$('executionLog');if(!log)return;
+  const elapsed=lastExecutionStarted?Math.max(0,Math.round((performance.now()-lastExecutionStarted)/1000)):0;
+  const mm=String(Math.floor(elapsed/60)).padStart(2,'0'),ss=String(elapsed%60).padStart(2,'0');
+  const prefix=type==='error'?'[error]':type==='success'?'[success]':'[info]';
+  log.textContent+=String.fromCharCode(10)+'['+mm+':'+ss+'] '+prefix+' '+message;
+  log.scrollTop=log.scrollHeight;
+}
+function setExecutionStep(id,state){const item=$(id);if(!item)return;item.classList.remove('active','done');if(state)item.classList.add(state)}
+function prepareTerminal(file){
+  const log=$('executionLog'),state=$('terminalState');
+  if(log)log.textContent='[ready] '+file.name+' selected. Press Process file to start.';
+  if(state){state.textContent='Ready';state.className='terminal-state'}
+  setExecutionStep('stepUpload','active');setExecutionStep('stepProcess','');setExecutionStep('stepComplete','');
+}
+function startTerminal(file){
+  lastExecutionStarted=performance.now();
+  const log=$('executionLog'),state=$('terminalState');
+  if(log)log.textContent='';
+  if(state){state.textContent='Running';state.className='terminal-state running'}
+  setExecutionStep('stepUpload','active');setExecutionStep('stepProcess','');setExecutionStep('stepComplete','');
+  appendTerminal('Input selected: '+file.name+' ('+Math.max(1,Math.round(file.size/1024))+' KB).');
+  appendTerminal('Submitting to the existing authenticated processing route.');
+}
+function finishTerminal(data){
+  setExecutionStep('stepUpload','done');setExecutionStep('stepProcess','done');setExecutionStep('stepComplete','done');
+  appendTerminal('HTTP response received'+(lastApiLatencyMs===null?'':' in '+Math.round(lastApiLatencyMs)+' ms')+'.');
+  appendTerminal('Processing response: '+Number(data.rows_cleaned||0).toLocaleString()+' row(s)/entry(ies); format '+String(data.output_format||'unknown')+'.');
+  appendTerminal('Report ready for review and download.','success');
+  const state=$('terminalState');if(state){state.textContent='Success';state.className='terminal-state success'}
+}
+function failTerminal(error){
+  setExecutionStep('stepUpload','done');setExecutionStep('stepProcess','active');setExecutionStep('stepComplete','');
+  appendTerminal(error||'Request failed. Check the notice above for details.','error');
+  const state=$('terminalState');if(state){state.textContent='Failed';state.className='terminal-state failed'}
+}
+function parseCsvSample(text,maxRows){
+  const rows=[];let row=[],cell='',quoted=false;
+  const LF=String.fromCharCode(10),CR=String.fromCharCode(13);
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(ch==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++}else quoted=!quoted}
+    else if(ch===','&&!quoted){row.push(cell);cell=''}
+    else if((ch===LF||ch===CR)&&!quoted){if(ch===CR&&text[i+1]===LF)i++;row.push(cell);cell='';if(row.some(v=>String(v).length))rows.push(row);row=[];if(rows.length>=(maxRows||8))break}
+    else cell+=ch;
+  }
+  if(rows.length<(maxRows||8)&&(cell.length||row.length)){row.push(cell);if(row.some(v=>String(v).length))rows.push(row)}
+  return rows;
+}
+function normalizeHeaderForPreview(value){return String(value===null||value===undefined?'':value).trim().toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'_').replace(/_+/g,'_').replace(/^_+|_+$/g,'')}
+function makeEmptyPreview(message){const box=document.createElement('div');box.className='diff-empty';box.textContent=message;return box}
+function renderCsvPreview(target,text,kind){
+  target.replaceChildren();const rows=parseCsvSample(text,8);
+  if(!rows.length){target.append(makeEmptyPreview('No previewable rows were found.'));return}
+  const table=document.createElement('table');table.className='diff-table';
+  const head=document.createElement('thead'),headRow=document.createElement('tr');
+  rows[0].forEach(value=>{const th=document.createElement('th');th.textContent=value||'(blank header)';if(kind==='raw'&&(value!==String(value).trim()||normalizeHeaderForPreview(value)!==value))th.className='diff-bad';if(kind==='clean')th.className='diff-good';headRow.append(th)});
+  head.append(headRow);table.append(head);const body=document.createElement('tbody');
+  rows.slice(1).forEach(row=>{const tr=document.createElement('tr');for(let i=0;i<rows[0].length;i++){const value=row[i]===undefined?'':String(row[i]),td=document.createElement('td');td.textContent=value;if(kind==='raw'&&value!==value.trim())td.className='diff-bad';if(kind==='clean')td.className='diff-good';tr.append(td)}body.append(tr)});
+  table.append(body);target.append(table);
+}
+function renderTextPreview(target,text,kind,format){
+  target.replaceChildren();let content=String(text||'');
+  if(format==='json'){try{content=JSON.stringify(JSON.parse(content),null,2)}catch(e){}}
+  const pre=document.createElement('pre');pre.className='diff-pre';
+  content.slice(0,16000).split(String.fromCharCode(10)).slice(0,28).forEach(line=>{const span=document.createElement('span');if(kind==='raw'(/[\t ]+$/.test(line)))span.className='diff-line-bad';else if(kind==='clean')span.className='diff-line-good';span.textContent=line;pre.append(span,document.createTextNode(String.fromCharCode(10)))});target.append(pre);
+  if(content.length>16000){const note=document.createElement('div');note.className='support-meta';note.textContent='Preview shortened to protect browser responsiveness; the full server result is retained.';target.append(note)}
+}
+async function renderDiffInspector(file,result){
+  const rawBox=$('diffRaw'),cleanBox=$('diffClean'),state=$('diffState');if(!rawBox||!cleanBox)return;
+  if(file){
+    if(state){state.textContent=result?'Output available':'Input selected';state.className='enterprise-tag'+(result?'':' muted')}
+    const extension=(file.name.split('.').pop()||'').toLowerCase();
+    if(['xlsx','xls'].includes(extension))rawBox.replaceChildren(makeEmptyPreview('Workbook selected ('+file.name+'). Binary Excel preview is not parsed in the browser; the existing server-side workbook processor remains unchanged.'));
+    else try{
+      if(lastRawPreviewFile!==file){lastRawPreviewText=await file.text();lastRawPreviewFile=file}
+      const raw=String(lastRawPreviewText||'').slice(0,120000);
+      if(extension==='csv')renderCsvPreview(rawBox,raw,'raw');else renderTextPreview(rawBox,raw,'raw',extension==='json'?'json':'text');
+      if(raw.length<(lastRawPreviewText||'').length){const note=document.createElement('div');note.className='support-meta';note.textContent='Raw preview truncated to 120 KB.';rawBox.append(note)}
+    }catch(e){rawBox.replaceChildren(makeEmptyPreview('The browser could not preview this input. Server processing is unchanged.'))}
+  }
+  if(result&&typeof result.formatted_result==='string'){
+    const format=String(result.output_format||'csv').toLowerCase();
+    if(format==='csv')renderCsvPreview(cleanBox,result.formatted_result,'clean');else renderTextPreview(cleanBox,result.formatted_result,'clean',format==='json'?'json':'text');
+    const foot=$('diffFootnote');if(foot)foot.textContent='Preview shows at most 8 rows or 28 lines. Full output remains available from the download control below.';
+  }else if(!result)cleanBox.replaceChildren(makeEmptyPreview('Cleaned output appears after the processing request succeeds.'));
+  else cleanBox.replaceChildren(makeEmptyPreview('This result did not include a text preview. Open the report details below.'));
+}
+function copySnippet(button){
+  const target=$(button.dataset.copyTarget);if(!target)return;
+  navigator.clipboard.writeText(target.textContent).then(()=>{const prior=button.textContent;button.textContent='Copied';window.setTimeout(()=>{button.textContent=prior},1200)}).catch(()=>{notice($('apiAccessNotice'),'Clipboard access was blocked. Select and copy the snippet manually.','error')});
+}
+
 function showResult(title,value){reportResult.replaceChildren();const heading=document.createElement('h3');heading.textContent=title;heading.style.margin='16px 0 7px';reportResult.append(heading);let printable=value,download=null,format='csv';if(value&&typeof value==='object'){format=value.output_format||'csv';if(value.formatted_result){download=value.formatted_result;printable=JSON.stringify(value.summary||{rows_cleaned:value.rows_cleaned},null,2)+'\n\n'+value.formatted_result}else printable=JSON.stringify(value,null,2)}const pre=document.createElement('pre');pre.className='result-box';pre.textContent=typeof printable==='string'?printable:JSON.stringify(printable,null,2);reportResult.append(pre);if(download!==null){const button=document.createElement('button');button.className='btn secondary small';button.textContent='Download '+(format==='json'?'JSON result':'cleaned CSV');button.style.marginTop='10px';button.addEventListener('click',()=>downloadReport(title,download,format));reportResult.append(button)}}
-async function submitJob(){const file=$('csv').files&&$('csv').files[0];if(!file)throw new Error('Choose a supported file before submitting the job.');const form=new FormData();form.append('file',file);form.append('operation',$('operation').value);const data=await api('/api/v1/automation/process-file',{method:'POST',body:form});notice(jobNotice,'Job completed. '+data.rows_cleaned+' row(s)/entry(ies) processed. Saved report ID: '+(data.job_id||'pending'),'good');showResult('Latest '+data.job_type.replace(/_/g,' ')+' report',data);await loadReports()}
-async function loadReports(){if(!currentUser){reportList.className='report-empty';reportList.textContent='Sign in to load your private report history.';$('metricJobs').textContent='—';$('metricLatest').textContent='—';$('metricLatestNote').textContent='Sign in to view your reports';$('activityLabel').textContent='Awaiting account sign-in';$('activityBar').style.width='0%';return}try{const data=await api('/api/v1/jobs');const jobs=data.jobs||[];reportsCache=jobs;$('metricJobs').textContent=String(jobs.length);$('activityLabel').textContent=jobs.length?jobs.length+' saved report'+(jobs.length===1?'':'s'):'Awaiting first report';$('activityBar').style.width=Math.min(100,jobs.length*10)+'%';if(jobs.length){$('metricLatest').textContent=(jobs[0].job_type||'CSV job').replace(/_/g,' ');$('metricLatestNote').textContent=jobs[0].created_at?new Date(jobs[0].created_at).toLocaleDateString():'Latest saved job'}else{$('metricLatest').textContent='—';$('metricLatestNote').textContent='No job completed yet'}reportList.replaceChildren();if(!jobs.length){reportList.className='report-empty';reportList.textContent='No reports yet. Upload a CSV to create the first saved result.';return}reportList.className='report-list';jobs.forEach(job=>{const row=document.createElement('article');row.className='report-row';const head=document.createElement('div');head.className='report-row-head';const title=document.createElement('strong');title.textContent=(job.job_type||'Automation job').replace(/_/g,' ');const state=document.createElement('span');state.className='tag';state.textContent=job.status||'unknown';head.append(title,state);const meta=document.createElement('small');meta.textContent='Created: '+(job.created_at||'time unavailable')+' · Report ID: '+job.id;const view=document.createElement('button');view.className='btn secondary small';view.textContent='Open report';view.addEventListener('click',()=>busy(view,async()=>{const full=await api('/api/v1/jobs/'+encodeURIComponent(job.id));showResult('Report '+job.id,full.job.result);notice(jobNotice,'Saved report loaded.','good')}));row.append(head,meta,view);reportList.append(row)});if($('autoOpenLatest').checked&&jobs.length){const latest=await api('/api/v1/jobs/'+encodeURIComponent(jobs[0].id));showResult('Latest saved report',latest.job.result)}}catch(e){reportList.className='report-empty';reportList.textContent='Unable to load reports. '+e.message}}
+async function submitJob(){
+ const file=$('csv').files&&$('csv').files[0];if(!file)throw new Error('Choose a supported file before submitting the job.');
+ startTerminal(file);setExecutionStep('stepUpload','active');appendTerminal('Upload request started. The server returns the completed result in one response.');
+ try{
+  const form=new FormData();form.append('file',file);form.append('operation',$('operation').value);
+  setExecutionStep('stepUpload','done');setExecutionStep('stepProcess','active');
+  appendTerminal('Waiting for the existing server processing route; no processing algorithm was changed.');
+  const data=await api('/api/v1/automation/process-file',{method:'POST',body:form});
+  finishTerminal(data);notice(jobNotice,'Job completed. '+data.rows_cleaned+' row(s)/entry(ies) processed. Saved report ID: '+(data.job_id||'pending'),'good');
+  await renderDiffInspector(file,data);showResult('Latest '+data.job_type.replace(/_/g,' ')+' report',data);await loadReports();
+ }catch(e){failTerminal(e.message);throw e}
+}
+async function loadHistoricalKpis(jobs){
+ const metricRows=$('metricRows'),metricHours=$('metricHours'),rowsNote=$('metricRowsNote'),hoursNote=$('metricHoursNote');
+ if(!currentUser||!jobs.length){if(metricRows)metricRows.textContent='0';if(metricHours)metricHours.textContent='0.00 h';if(rowsNote)rowsNote.textContent=currentUser?'No completed reports yet':'Sign in to summarize recent reports';if(hoursNote)hoursNote.textContent='Estimate only; no work history yet';return}
+ let totalRows=0,readCount=0;
+ for(let i=0;i<jobs.length;i+=4){
+  const batch=await Promise.allSettled(jobs.slice(i,i+4).map(job=>api('/api/v1/jobs/'+encodeURIComponent(job.id))));
+  batch.forEach(item=>{if(item.status!=='fulfilled')return;const job=item.value&&item.value.job,result=job&&job.result;if(!result||typeof result!=='object')return;
+   const candidate=result.rows_cleaned!==undefined?result.rows_cleaned:(result.summary&&result.summary.rows_output!==undefined?result.summary.rows_output:(result.summary&&result.summary.rows_received!==undefined?result.summary.rows_received:0));
+   const count=Number(candidate);if(Number.isFinite(count)&&count>=0){totalRows+=count;readCount++}
+  });
+ }
+ if(metricRows)metricRows.textContent=totalRows.toLocaleString();
+ if(rowsNote)rowsNote.textContent=readCount+' of '+jobs.length+' recent reports summarized';
+ if(metricHours)metricHours.textContent=(totalRows*2/1000/60).toFixed(2)+' h';
+ if(hoursNote)hoursNote.textContent='Estimate: 2 minutes per 1,000 rows';
+}
+async function loadReports(){
+ if(!currentUser){reportList.className='report-empty';reportList.textContent='Sign in to load your private report history.';$('metricJobs').textContent='—';$('metricLatest').textContent='—';$('metricLatestNote').textContent='Sign in to view your reports';$('activityLabel').textContent='Awaiting account sign-in';$('activityBar').style.width='0%';if($('metricRows'))$('metricRows').textContent='—';if($('metricHours'))$('metricHours').textContent='—';if($('metricRowsNote'))$('metricRowsNote').textContent='Sign in to summarize recent reports';if($('metricHoursNote'))$('metricHoursNote').textContent='Estimate, not a measured result';return}
+ try{
+  const data=await api('/api/v1/jobs'),jobs=data.jobs||[];reportsCache=jobs;$('metricJobs').textContent=String(jobs.length);
+  const jobNote=document.querySelector('#metricJobs')?.parentElement?.querySelector('.metric-note');if(jobNote)jobNote.textContent=jobs.length>=25?'Most recent 25 reports':'Saved reports in your account';
+  $('activityLabel').textContent=jobs.length?jobs.length+' saved report'+(jobs.length===1?'':'s'):'Awaiting first report';$('activityBar').style.width=Math.min(100,jobs.length*10)+'%';
+  if(jobs.length){$('metricLatest').textContent=(jobs[0].job_type||'Automation job').replace(/_/g,' ');$('metricLatestNote').textContent=jobs[0].created_at?new Date(jobs[0].created_at).toLocaleDateString():'Latest saved job'}else{$('metricLatest').textContent='—';$('metricLatestNote').textContent='No job completed yet'}
+  reportList.replaceChildren();
+  if(!jobs.length){reportList.className='report-empty';reportList.textContent='No reports yet. Upload a supported file to create the first saved result.';await loadHistoricalKpis(jobs);return}
+  reportList.className='report-list';jobs.forEach(job=>{const row=document.createElement('article');row.className='report-row';const head=document.createElement('div');head.className='report-row-head';const title=document.createElement('strong');title.textContent=(job.job_type||'Automation job').replace(/_/g,' ');const state=document.createElement('span');state.className='tag';state.textContent=job.status||'unknown';head.append(title,state);const meta=document.createElement('small');meta.textContent='Created: '+(job.created_at||'time unavailable')+' · Report ID: '+job.id;const view=document.createElement('button');view.className='btn secondary small';view.textContent='Open report';view.addEventListener('click',()=>busy(view,async()=>{const full=await api('/api/v1/jobs/'+encodeURIComponent(job.id));showResult('Report '+job.id,full.job.result);notice(jobNotice,'Saved report loaded.','good')}));row.append(head,meta,view);reportList.append(row)});
+  loadHistoricalKpis(jobs).catch(()=>{if($('metricRowsNote'))$('metricRowsNote').textContent='Some historical report totals could not be loaded'});
+  if($('autoOpenLatest').checked&&jobs.length){const latest=await api('/api/v1/jobs/'+encodeURIComponent(jobs[0].id));showResult('Latest saved report',latest.job.result)}
+ }catch(e){reportList.className='report-empty';reportList.textContent='Unable to load reports. '+e.message}
+}
 function applyPreferences(){document.body.classList.toggle('compact',$('compactMode').checked);try{localStorage.setItem('autoops_compact',String($('compactMode').checked));localStorage.setItem('autoops_auto_latest',String($('autoOpenLatest').checked))}catch(e){}}
 try{$('compactMode').checked=localStorage.getItem('autoops_compact')==='true';$('autoOpenLatest').checked=localStorage.getItem('autoops_auto_latest')==='true'}catch(e){}
 $('compactMode').addEventListener('change',applyPreferences);$('autoOpenLatest').addEventListener('change',()=>{applyPreferences();if(currentUser)loadReports()});
@@ -925,13 +1200,16 @@ $('loginBtn').addEventListener('click',()=>busy($('loginBtn'),()=>authenticate('
 $('logoutBtn').addEventListener('click',()=>busy($('logoutBtn'),logout));
 $('checkoutBtn').addEventListener('click',()=>busy($('checkoutBtn'),checkout));
 $('submitJobBtn').addEventListener('click',()=>busy($('submitJobBtn'),submitJob));
+$('csv').addEventListener('change',()=>{const file=$('csv').files&&$('csv').files[0];if(!file)return;lastRawPreviewFile=null;lastRawPreviewText=null;renderDiffInspector(file,null);prepareTerminal(file)});
+document.querySelectorAll('[data-copy-target]').forEach(button=>button.addEventListener('click',()=>copySnippet(button)));
+$('requestApiAccessBtn').addEventListener('click',()=>{const subject='AutoOps Hub developer API access';const body='Please contact me about secure API-key issuance and customer webhook capabilities.';notice($('apiAccessNotice'),'Opening your email client to request secure developer API access.','good');window.location.href='mailto:joramalphaeus@gmail.com?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body)});
 $('refreshBtn').addEventListener('click',()=>busy($('refreshBtn'),loadReports));
-document.querySelectorAll('.plan-select').forEach(button=>button.addEventListener('click',()=>{$('tier').value=button.dataset.tier;document.querySelectorAll('.price-card').forEach(card=>card.classList.toggle('selected-plan',card.dataset.priceTier===button.dataset.tier));document.querySelectorAll('.plan-select').forEach(b=>{b.textContent='Select '+({'tier_1_51':'Basic','tier_2_83':'Scale','tier_3_129':'Ultimate'})[b.dataset.tier];});button.textContent='Selected';notice(billingNotice,$('tier').selectedOptions[0].text+' selected. Continue to '+(paymentMode==='live'?'PayPal':'PayPal Sandbox')+' to create an order.','good');$('checkoutBtn').scrollIntoView({behavior:'smooth',block:'center'})}));
+document.querySelectorAll('.plan-select').forEach(button=>button.addEventListener('click',()=>{$('tier').value=button.dataset.tier;document.querySelectorAll('.price-card').forEach(card=>card.classList.toggle('selected-plan',card.dataset.priceTier===button.dataset.tier));document.querySelectorAll('.plan-select').forEach(b=>{b.textContent='Select '+({'tier_1_51':'Basic','tier_2_83':'Scale','tier_3_129':'Ultimate'})[b.dataset.tier];});button.textContent='Selected';notice(billingNotice,$('tier').selectedOptions[0].text+' selected. Continue to PayPal to create a one-time order.','good');$('checkoutBtn').scrollIntoView({behavior:'smooth',block:'center'})}));
 (async()=>{applyPreferences();setNavView((window.location.hash||'#overview').slice(1));try{await configurePaymentMode();if(await handleAuthCallback())return;const query=new URLSearchParams(window.location.search);if(query.get('payment')==='success'&&query.get('token')){setNavView('billing');await captureReturned();return}if(query.get('payment')==='cancelled'){setNavView('billing');notice(billingNotice,'PayPal checkout was cancelled. No payment was captured. You can choose a plan and try again.','error');window.history.replaceState({},'',window.location.pathname+'#billing')}const signed=await loadAccount(true);if(signed)await loadReports();else await loadReports()}catch(e){notice(accountNotice,e.message,'error')}})();
 })();
 </script>
 </body>
-</html>''')
+</html>
 
 @app.post("/api/v1/auth/signup")
 async def auth_signup(payload: Dict[str, Any], response: Response):
