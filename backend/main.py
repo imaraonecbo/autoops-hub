@@ -541,6 +541,10 @@ async def paypal_webhook(request: Request):
             "capture_id": capture_id,
             "captured_at": datetime.now(timezone.utc).isoformat(),
         }).eq("paypal_order_id", order_id).execute()
+        _record_marketing_event(
+            str(saved["user_id"]), f"purchase:{capture_id}", "purchase_completed",
+            value=amount_val, metadata={"tier": tier, "capture_id": capture_id},
+        )
         logger.info("Verified PayPal capture applied to server-created order %s.", order_id)
         return WebhookResponse(success=True, message="Verified PayPal capture recorded and account tier synchronized.",
                                details={"transaction_id": capture_id, "user_id": saved["user_id"],
@@ -723,6 +727,114 @@ def _set_session_cookie(response, auth_data: Dict[str, Any]) -> None:
         "autoops_session", token, httponly=True, secure=True, samesite="lax",
         max_age=int(auth_data.get("expires_in") or 3600), path="/",
     )
+
+def _marketing_fields(payload: Dict[str, Any]) -> Dict[str, str]:
+    """Normalize non-sensitive campaign tags supplied by the customer-facing page."""
+    payload = payload if isinstance(payload, dict) else {}
+    allowed = ("source", "medium", "campaign", "content", "term", "landing_path", "referrer_host")
+    result: Dict[str, str] = {}
+    for key in allowed:
+        raw = payload.get(key)
+        if not isinstance(raw, str):
+            continue
+        value = raw.strip()
+        if key in ("source", "medium", "campaign"):
+            value = value or {"source": "direct", "medium": "none", "campaign": "unattributed"}[key]
+        if value:
+            result[key] = value[:400 if key == "landing_path" else 160]
+    result.setdefault("source", "direct")
+    result.setdefault("medium", "none")
+    result.setdefault("campaign", "unattributed")
+    return result
+
+
+def _record_marketing_attribution(user_id: str, fields: Dict[str, str]) -> None:
+    """Persist first and last campaign touch without storing email or raw referrer URLs."""
+    if not supabase or not user_id:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    source = fields.get("source", "direct")
+    medium = fields.get("medium", "none")
+    campaign = fields.get("campaign", "unattributed")
+    first = {
+        "user_id": user_id,
+        "first_source": source,
+        "first_medium": medium,
+        "first_campaign": campaign,
+        "first_content": fields.get("content"),
+        "first_term": fields.get("term"),
+        "first_landing_path": fields.get("landing_path"),
+        "first_referrer_host": fields.get("referrer_host"),
+        "first_touch_at": now,
+        "last_source": source,
+        "last_medium": medium,
+        "last_campaign": campaign,
+        "last_content": fields.get("content"),
+        "last_term": fields.get("term"),
+        "last_landing_path": fields.get("landing_path"),
+        "last_referrer_host": fields.get("referrer_host"),
+        "last_touch_at": now,
+        "updated_at": now,
+    }
+    try:
+        existing = supabase.table("marketing_attributions").select("user_id").eq("user_id", user_id).limit(1).execute()
+        if existing.data:
+            # A direct checkout must not overwrite a known campaign touch.
+            if source == "direct" and campaign == "unattributed":
+                return
+            update = {key: value for key, value in first.items() if key.startswith("last_")}
+            update["updated_at"] = now
+            supabase.table("marketing_attributions").update(update).eq("user_id", user_id).execute()
+        else:
+            supabase.table("marketing_attributions").insert(first).execute()
+    except Exception:
+        logger.exception("Marketing attribution could not be recorded for user %s.", user_id)
+
+
+def _record_marketing_event(
+    user_id: Optional[str],
+    event_key: str,
+    event_name: str,
+    fields: Optional[Dict[str, str]] = None,
+    value: Optional[float] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Record idempotent conversion events; never let analytics interrupt checkout or signup."""
+    if not supabase:
+        return
+    fields = fields or {}
+    try:
+        if user_id and (
+            not fields or (
+                fields.get("source", "direct") == "direct"
+                and fields.get("campaign", "unattributed") == "unattributed"
+            )
+        ):
+            saved = supabase.table("marketing_attributions").select(
+                "last_source,last_medium,last_campaign"
+            ).eq("user_id", user_id).limit(1).execute()
+            if saved.data:
+                row = saved.data[0]
+                fields = {
+                    "source": row.get("last_source") or "direct",
+                    "medium": row.get("last_medium") or "none",
+                    "campaign": row.get("last_campaign") or "unattributed",
+                }
+        record = {
+            "event_key": event_key[:200],
+            "event_name": event_name,
+            "user_id": user_id,
+            "source": fields.get("source", "direct")[:160],
+            "medium": fields.get("medium", "none")[:160],
+            "campaign": fields.get("campaign", "unattributed")[:160],
+            "value": value,
+            "currency": "USD",
+            "metadata": metadata or {},
+        }
+        supabase.table("marketing_events").upsert(record, on_conflict="event_key").execute()
+    except Exception:
+        logger.exception("Marketing event %s could not be recorded.", event_name)
+
 
 @app.get("/api/v1/health")
 async def health_check():
@@ -1018,7 +1130,7 @@ async function initializePayPalFundingButtons(){
           const order=await api('/api/v1/payments/paypal/order',{
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({tier:$('tier').value})
+            body:JSON.stringify({tier:$('tier').value,marketing:marketingAttribution()})
           });
           if(!order.order_id)throw new Error('PayPal did not return a valid order ID.');
           return order.order_id;
@@ -1071,7 +1183,8 @@ function notice(el,message,type){if(!el)return;el.textContent=message;el.classNa
 function errorMessage(data,status){if(data&&typeof data.detail==='string')return data.detail;if(data&&data.detail&&typeof data.detail==='object')return data.detail.message||JSON.stringify(data.detail);if(data&&data.message)return data.message;return 'Request failed ('+status+'). Please try again.'}
 async function api(path,options){const started=performance.now();let response;try{response=await fetch(path,Object.assign({credentials:'same-origin'},options||{}))}catch(e){updateLatencyKpi(path,performance.now()-started);throw e}const latency=performance.now()-started;lastApiLatencyMs=latency;updateLatencyKpi(path,latency);let data={};try{data=await response.json()}catch(e){}if(!response.ok)throw new Error(errorMessage(data,response.status));return data}
 async function busy(button,work){if(!button||button.disabled)return;const old=button.textContent;button.disabled=true;button.textContent='Working…';try{await work()}catch(e){const target=(button.id==='submitJobBtn'||button.id==='refreshBtn')?jobNotice:(button.id==='checkoutBtn'||button.classList.contains('plan-select'))?billingNotice:(button.id==='signupBtn'||button.id==='loginBtn'||button.id==='logoutBtn')?settingsAccountNotice:accountNotice;notice(target,e.message||'Something went wrong. Please try again.','error')}finally{button.disabled=false;button.textContent=old}}
-function credentials(){const email=$('email').value.trim(),password=$('password').value;if(!email||email.indexOf('@')<1)throw new Error('Enter a valid email address first.');if(password.length<10)throw new Error('Use a password of at least 10 characters.');return {email:email,password:password}}
+function marketingAttribution(){const q=new URLSearchParams(window.location.search);let referrerHost='';try{referrerHost=window.document.referrer?new URL(window.document.referrer).hostname:''}catch(e){}const get=(key)=>{const v=q.get('utm_'+key);return v?v.slice(0,160):''};return {source:get('source')||'direct',medium:get('medium')||'none',campaign:get('campaign')||'unattributed',content:get('content'),term:get('term'),landing_path:(window.location.pathname||'/').slice(0,400),referrer_host:referrerHost.slice(0,160)}}
+function credentials(){const email=$('email').value.trim(),password=$('password').value;if(!email||email.indexOf('@')<1)throw new Error('Enter a valid email address first.');if(password.length<10)throw new Error('Use a password of at least 10 characters.');return {email:email,password:password,marketing:marketingAttribution()}}
 function setNavView(view){if(!$( 'view-'+view))view='overview';document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));document.querySelectorAll('.nav-link').forEach(el=>el.classList.toggle('active',el.dataset.view===view));const names={overview:'Overview',jobs:'Jobs & Reports',billing:'Billing & Plans',settings:'Settings'};$('crumbTitle').textContent=names[view]||'Overview';if(window.location.hash!=='#'+view)history.replaceState({},'',window.location.pathname+window.location.search+'#'+view);$('sidebar').classList.remove('open');$('navOverlay').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'})}
 document.querySelectorAll('.nav-link').forEach(button=>button.addEventListener('click',()=>setNavView(button.dataset.view)));
 document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>setNavView(button.dataset.go)));
@@ -1319,9 +1432,14 @@ async def auth_signup(payload: Dict[str, Any], response: Response):
     confirmation_redirect = f"{public_app_url}/?auth=confirmed"
     auth_path = "signup?redirect_to=" + quote(confirmation_redirect, safe="")
     auth_data = await _supabase_auth_call(auth_path, {"email": email, "password": password})
+    user_id = (auth_data.get("user") or {}).get("id")
+    marketing = _marketing_fields(payload.get("marketing") or {})
+    if user_id:
+        _record_marketing_attribution(str(user_id), marketing)
+        _record_marketing_event(str(user_id), f"signup:{user_id}", "signup_completed", marketing, metadata={"method": "email"})
     if auth_data.get("access_token"):
         _set_session_cookie(response, auth_data)
-        return {"message": "Account created and signed in.", "user": {"id": auth_data.get("user", {}).get("id"), "email": email}}
+        return {"message": "Account created and signed in.", "user": {"id": user_id, "email": email}}
     return {"message": "Account created. Check your email to confirm it, then sign in.", "user": None}
 
 @app.post("/api/v1/auth/session")
@@ -1423,6 +1541,67 @@ async def auth_me(request: Request):
     profile = supabase.table("profiles").select("current_tier,status").eq("user_id", user["user_id"]).execute()
     return {"user": {"id": user["user_id"], "email": user.get("email")}, "profile": profile.data[0] if profile.data else None}
 
+@app.get("/api/v1/marketing/report")
+async def marketing_report(request: Request):
+    """Return aggregate acquisition metrics only to the explicitly configured owner account."""
+    user = await get_authenticated_user(request)
+    admin_email = os.getenv("MARKETING_REPORT_ADMIN_EMAIL", "").strip().lower()
+    if not admin_email:
+        raise HTTPException(status_code=503, detail="Marketing reporting is not enabled until the owner email is configured.")
+    if str(user.get("email", "")).strip().lower() != admin_email:
+        raise HTTPException(status_code=403, detail="Marketing report access is restricted to the configured owner.")
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database is not connected.")
+    try:
+        result = supabase.table("marketing_events").select(
+            "event_name,source,medium,campaign,value,currency,occurred_at"
+        ).order("occurred_at", desc=True).limit(10000).execute()
+        rows = result.data or []
+        by_event: Dict[str, int] = {}
+        by_channel: Dict[str, Dict[str, Any]] = {}
+        revenue = 0.0
+        for row in rows:
+            event_name = str(row.get("event_name") or "unknown")
+            by_event[event_name] = by_event.get(event_name, 0) + 1
+            key = "|".join([
+                str(row.get("source") or "direct"),
+                str(row.get("medium") or "none"),
+                str(row.get("campaign") or "unattributed"),
+            ])
+            channel = by_channel.setdefault(key, {
+                "source": row.get("source") or "direct",
+                "medium": row.get("medium") or "none",
+                "campaign": row.get("campaign") or "unattributed",
+                "signups": 0,
+                "checkouts": 0,
+                "purchases": 0,
+                "revenue_usd": 0.0,
+            })
+            if event_name == "signup_completed":
+                channel["signups"] += 1
+            elif event_name == "checkout_started":
+                channel["checkouts"] += 1
+            elif event_name == "purchase_completed":
+                channel["purchases"] += 1
+                revenue += float(row.get("value") or 0)
+                channel["revenue_usd"] += float(row.get("value") or 0)
+        for channel in by_channel.values():
+            channel["revenue_usd"] = round(channel["revenue_usd"], 2)
+        return {
+            "events_scanned": len(rows),
+            "truncated": len(rows) == 10000,
+            "events_by_name": by_event,
+            "revenue_usd": round(revenue, 2),
+            "channels": sorted(by_channel.values(), key=lambda item: (item["purchases"], item["signups"]), reverse=True),
+            "note": "Counts include events recorded after attribution tracking was deployed; this is not retroactive and does not include social-platform impressions.",
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Owner marketing report query failed.")
+        raise HTTPException(status_code=503, detail="Marketing report data is temporarily unavailable.")
+
+
 async def _paypal_access_token() -> str:
     _assert_paypal_runtime_ready()
     try:
@@ -1466,6 +1645,7 @@ async def create_paypal_order(request: Request, payload: Dict[str, Any]):
     if not supabase:
         raise HTTPException(status_code=503, detail="Database is not connected.")
     tier = str(payload.get("tier", ""))
+    marketing = _marketing_fields(payload.get("marketing") or {})
     if tier not in TIERS:
         raise HTTPException(status_code=400, detail="Unknown plan.")
     profile = supabase.table("profiles").select("user_id").eq("user_id", user["user_id"]).execute()
@@ -1505,6 +1685,11 @@ async def create_paypal_order(request: Request, payload: Dict[str, Any]):
             "paypal_order_id": order_id, "user_id": user["user_id"],
             "tier": tier, "amount": float(amount), "status": "pending"
         }).execute()
+        _record_marketing_attribution(str(user["user_id"]), marketing)
+        _record_marketing_event(
+            str(user["user_id"]), f"checkout:{order_id}", "checkout_started",
+            marketing, value=float(amount), metadata={"tier": tier},
+        )
         return {"order_id": order_id, "approval_url": approval, "tier": tier, "amount": amount, "currency": "USD"}
     except HTTPException:
         raise
@@ -1573,6 +1758,10 @@ async def capture_paypal_order(request: Request, payload: Dict[str, Any]):
         supabase.table("paypal_orders").update({
             "status": "captured", "capture_id": cap["id"], "captured_at": datetime.now(timezone.utc).isoformat()
         }).eq("paypal_order_id", order_id).execute()
+        _record_marketing_event(
+            str(user["user_id"]), f"purchase:{cap['id']}", "purchase_completed",
+            value=float(saved["amount"]), metadata={"tier": saved["tier"], "capture_id": cap["id"]},
+        )
         return {"success": True, "message": f"{_paypal_mode().title()} payment captured and account tier updated.", "tier": saved["tier"], "capture_id": cap["id"], "transaction_id": cap["id"], "database_result": applied.data}
     except HTTPException:
         raise
