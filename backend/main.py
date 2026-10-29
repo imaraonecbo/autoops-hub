@@ -868,8 +868,8 @@ async function configurePaymentMode(){
     const button=$('checkoutBtn');
     if(button){
       button.disabled=!paymentsEnabled;
-      button.textContent=paymentsEnabled?'Continue to '+(paymentMode==='live'?'PayPal':'PayPal Sandbox')+' →':'Checkout temporarily unavailable';
-      button.title=paymentsEnabled?'Continue to '+(paymentMode==='live'?'PayPal':'PayPal Sandbox'):'Checkout is disabled until payment and database readiness are verified.';
+      button.textContent=paymentsEnabled?'Continue to PayPal →':'Checkout temporarily unavailable';
+      button.title=paymentsEnabled?'Continue to PayPal to approve your one-time payment.':'Checkout is disabled until payment and database readiness are verified.';
       if(paymentsEnabled)button.removeAttribute('aria-disabled');else button.setAttribute('aria-disabled','true');
     }
   }catch(e){
