@@ -19,7 +19,8 @@ The current deployment uses Render free plans. Free hosting has limitations and 
 - The free allowance supports up to **two jobs** and **100 data rows per CSV job**.
 - Other file-processing workflows depend on plan eligibility; check the live app for current limits.
 - The app returns a processing summary and output for the user to review.
-- PayPal checkout supports one-time plans when production payment settings are enabled.
+- PayPal checkout is **Live-only** and uses the fixed API host `https://api-m.paypal.com`; Sandbox endpoints and `PAYPAL_API_BASE` environment overrides are not supported.
+- Live checkout remains fail-closed unless `PAYPAL_LIVE_ENABLED=true` and the PayPal Live REST app credentials and live webhook ID are configured.
 
 ## Architecture
 
