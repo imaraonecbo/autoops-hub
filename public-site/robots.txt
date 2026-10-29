@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://autoops-hub-public.onrender.com/sitemap.xml
