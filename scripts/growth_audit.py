@@ -84,6 +84,19 @@ code, body = fetch_with_retry(health_url)
 summary.append(f"- {'PASS' if code == 200 else 'FAIL'} {health_url} — HTTP {code}")
 if code != 200:
     failures.append(f"application health endpoint: HTTP {code}")
+else:
+    try:
+        health = json.loads(body)
+        if health.get("status") != "ok":
+            failures.append(f"application readiness is {health.get('status', 'unknown')}")
+        if health.get("database_configured") is not True or health.get("database_reachable") is not True:
+            failures.append("application database readiness check failed")
+        if health.get("payment_mode") != "live":
+            failures.append(f"production payment mode is {health.get('payment_mode', 'unknown')}, not live")
+        if health.get("paypal_checkout_enabled") is not True:
+            failures.append("PayPal live checkout is not enabled")
+    except (json.JSONDecodeError, AttributeError):
+        failures.append("application health endpoint did not return valid JSON")
 
 print("# AutoOps Hub weekly growth and availability audit\n")
 print("## Public checks")
