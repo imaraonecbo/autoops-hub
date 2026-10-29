@@ -1,0 +1,99 @@
+name: Post-upgrade live production smoke
+
+on:
+  push:
+    branches:
+      - post-upgrade-live-smoke-20261029
+
+permissions:
+  contents: read
+
+jobs:
+  production-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify production health and PayPal readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoops-hub-production.onrender.com"
+          curl --connect-timeout 10 --max-time 60 --retry 3 --retry-delay 5 --fail --silent --show-error "$base/api/v1/health" -o health.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          health = json.loads(Path("health.json").read_text(encoding="utf-8"))
+          keys = (
+              "status", "database_configured", "database_reachable", "payment_mode",
+              "paypal_live_enabled", "paypal_credentials_configured",
+              "paypal_credential_checks", "paypal_checkout_enabled",
+          )
+          # Only print boolean presence/status fields; never credential values.
+          print(json.dumps({key: health.get(key) for key in keys}, indent=2, sort_keys=True))
+          expected = {
+              "status": "ok",
+              "database_configured": True,
+              "database_reachable": True,
+              "payment_mode": "live",
+              "paypal_live_enabled": True,
+              "paypal_credentials_configured": True,
+              "paypal_checkout_enabled": True,
+          }
+          failures = [
+              f"{key}: expected {value!r}, got {health.get(key)!r}"
+              for key, value in expected.items()
+              if health.get(key) != value
+          ]
+          checks = health.get("paypal_credential_checks") or {}
+          for name in ("client_id", "client_secret", "webhook_id"):
+              if checks.get(name) is not True:
+                  failures.append(f"paypal_credential_checks.{name} is not true")
+          if failures:
+              raise SystemExit("Production readiness check failed: " + "; ".join(failures))
+          PY
+
+      - name: Verify live dashboard includes new UI modules and support
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoops-hub-production.onrender.com"
+          curl --connect-timeout 10 --max-time 60 --retry 3 --retry-delay 5 --fail --silent --show-error "$base/" -o dashboard.html
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          html = Path("dashboard.html").read_text(encoding="utf-8")
+          required = [
+              'id="diffViewer"',
+              'id="executionLog"',
+              'id="view-integrations"',
+              'id="metricRows"',
+              'id="metricHours"',
+              'id="metricLatency"',
+              "joramalphaeus@gmail.com",
+              'id="curlSnippet"',
+              'id="nodeSnippet"',
+              'id="pythonSnippet"',
+          ]
+          missing = [item for item in required if item not in html]
+          if missing:
+              raise SystemExit("Live dashboard is missing: " + ", ".join(missing))
+          scripts = re.findall(r"<script[^>]*>([\s\S]*?)</script>", html, flags=re.I)
+          if not scripts:
+              raise SystemExit("No embedded dashboard script was found.")
+          Path("live-dashboard.js").write_text(scripts[-1], encoding="utf-8")
+          print(f"Live dashboard contains all requested UI markers; JS characters: {len(scripts[-1])}.")
+          PY
+          node --check live-dashboard.js
+
+      - name: Verify unsigned PayPal webhook is rejected
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoops-hub-production.onrender.com"
+          code=$(curl --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 3 --silent --show-error --output webhook.json --write-out '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' \
+            --data '{"id":"AUTOOPS-UNSIGNED-POST-UPGRADE-CHECK","event_type":"PAYMENT.CAPTURE.COMPLETED","resource":{}}' \
+            "$base/api/v1/payments/paypal-webhook")
+          echo "Unsigned webhook HTTP status: $code"
+          cat webhook.json
+          test "$code" = "401"
+          echo "PASS: live endpoint rejected unsigned PayPal webhook."
