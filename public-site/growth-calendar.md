@@ -1,39 +1,60 @@
-# AutoOps Hub — four-week organic growth calendar
+# AutoOps Hub — Kenya-first organic growth plan
 
-Purpose: attract relevant international visitors by answering real file-processing questions. This is a draft queue, not permission to auto-post to third-party accounts.
+**Goal:** attract first-time users without paid ads, a purchased domain, cold-email blasts, or fake testimonials. Start with people in Kenya who work with spreadsheets and small-business records, then expand after validating the workflow.
 
-## Guardrails
-- Publish only truthful, useful content; no fake testimonials, fabricated performance claims, scraped email lists, mass unsolicited messages, or duplicate keyword pages.
-- Never include customer data, credentials, or private operational logs in examples.
-- Every item should link to the live workspace or a relevant workflow guide with UTM parameters.
-- Review product limits and prices against the live Billing & Plans page before publishing.
-- Measure visits, signup conversion, checkout starts and completed PayPal purchases. Do not claim sales until verified.
+## Rules
+- Share a useful tip first and the product link second. Respect each group's self-promotion rules.
+- Never scrape member lists, mass-message strangers, buy followers, or repeatedly post identical adverts.
+- Use fictional/non-sensitive examples; never expose customer files, credentials, private logs, or payment information.
+- Be accurate: Free supports up to two jobs with up to 100 CSV data rows per job. It formats headings and trims spaces; it does not validate stock, calculate totals, or remove duplicates on Free.
+- Invite honest feedback. A visit or signup isn't a sale; count sales only after a verified payment.
 
-## Week 1 — CSV cleanup
-1. Guide: “A practical checklist for cleaning CSV column names.”
-2. Short post: three common CSV import problems and how to spot them.
-3. Distribution: answer a relevant question in a community only when the post genuinely helps; disclose the AutoOps Hub link and follow community rules.
+## Worked example
+Guide: https://autoops-hub-public.onrender.com/kenya-csv-stock-cleanup.html  
+Live workspace: https://autoops-hub-production.onrender.com/
 
-## Week 2 — Spreadsheet reporting
-1. Guide: “How to review a processed spreadsheet before using it.”
-2. Short post: a repeatable spreadsheet handoff checklist.
-3. Distribution: share the guide with relevant spreadsheet/data-operations communities where self-promotion is allowed.
+## Ready-to-share post: WhatsApp or Facebook business group
+> Small spreadsheet tip for anyone who gets stock lists as CSV: before importing a file, check for inconsistent column names and accidental spaces around values. Those small formatting problems can make a file harder to map into another tool.
+>
+> I made a short example with fictional shop stock data, showing original headings and the cleaned version. The free AutoOps Hub CSV allowance supports up to 100 data rows per job (two jobs total), so you can try a small sample first. It doesn't reconcile stock or calculate accounting totals—always review the output.
+>
+> Example and sample file: https://autoops-hub-public.onrender.com/kenya-csv-stock-cleanup.html
+>
+> Please use fictional or non-sensitive data for a first test. Feedback about what's unclear is welcome.
 
-## Week 3 — JSON and logs
-1. Guide: “A safe checklist for preparing JSON and log files for analysis.”
-2. Short post: why secrets and personal data should be removed before uploading logs.
-3. Distribution: answer relevant developer-operations questions with a direct, useful explanation first.
+Suggested tracking URL (only where links are allowed):  
+`https://autoops-hub-public.onrender.com/kenya-csv-stock-cleanup.html?utm_source=whatsapp&utm_medium=organic&utm_campaign=kenya_csv_cleanup`
 
-## Week 4 — Workflow efficiency and conversion
-1. Guide: “When recurring file cleanup is worth automating.”
-2. Short post: compare manual steps with a repeatable workflow without inventing time-savings numbers.
-3. Review analytics and improve the page that receives relevant visits but has low workspace click-through.
+## Ready-to-share post: LinkedIn
+> A practical automation example for small teams in Kenya: a messy CSV heading like ` Product Name ` can become `product_name`, while extra spaces around values can be trimmed before review or import.
+>
+> AutoOps Hub has a short worked example with invented stock rows and a downloadable sample. The free allowance is intentionally limited (up to 100 CSV rows per job, two jobs total). It formats the file; it does not prove the stock or prices are correct.
+>
+> Walkthrough: https://autoops-hub-public.onrender.com/kenya-csv-stock-cleanup.html
+>
+> What's the most common formatting issue you see in spreadsheet handoffs?
 
-## Tracking convention
-Use campaign URLs such as:
-- `?utm_source=community&utm_medium=helpful_answer&utm_campaign=csv_cleanup`
-- `?utm_source=social&utm_medium=organic&utm_campaign=spreadsheet_reporting`
-- `?utm_source=search&utm_medium=organic&utm_campaign=json_logs`
+Suggested tracking URL:  
+`https://autoops-hub-public.onrender.com/kenya-csv-stock-cleanup.html?utm_source=linkedin&utm_medium=organic&utm_campaign=kenya_csv_cleanup`
 
-## Weekly review
-The GitHub Actions audit checks that public pages, metadata, robots.txt, sitemap.xml and the application health endpoint respond. It does not measure search rankings or guarantee traffic. Add Search Console and privacy-conscious analytics only after their ownership and consent requirements are configured.
+## Helpful-answer template for an Excel/data community
+> Before importing a CSV, work on a copy, inspect the first row for inconsistent labels, and look for accidental spaces around values. After cleaning, compare the output with the original before using it in a business process. Here is a fictional three-row example if useful: https://autoops-hub-public.onrender.com/kenya-csv-stock-cleanup.html
+
+Only share the link when it genuinely answers the question and the group's rules allow it.
+
+## First seven days
+1. Test the sample CSV yourself and confirm the output in the live workspace.
+2. Share the Facebook/WhatsApp tip in one or two relevant Kenyan communities that allow useful links.
+3. Answer one existing spreadsheet question with a genuinely helpful explanation; don't force the product into unrelated threads.
+4. Publish the LinkedIn example if you use LinkedIn.
+5. Review questions and improve the guide where readers get stuck.
+6. Share a different tip rather than repeating the same advert.
+7. Review real referrals and signups; decide which topic deserves another guide.
+
+## Tracking and measurement
+Use tagged links so signups and later verified checkout events can be attributed where the app's tracking pipeline supports them:
+- `utm_source=whatsapp&utm_medium=organic&utm_campaign=kenya_csv_cleanup`
+- `utm_source=linkedin&utm_medium=organic&utm_campaign=kenya_csv_cleanup`
+- `utm_source=facebook_group&utm_medium=organic&utm_campaign=kenya_csv_cleanup`
+
+A sitemap is a crawl hint, not a guarantee of indexing. Search Console ownership and sitemap submission are separate tasks. Organic traffic and sales are not guaranteed.
