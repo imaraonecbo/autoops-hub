@@ -44,6 +44,9 @@ class PasswordRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Forgot password?", source)
         self.assertIn("Recovery link verified", source)
         self.assertIn("If an account exists", source)
+        self.assertIn("searchParams.delete('auth')", source)
+        self.assertIn("paymentMode='unknown'", source)
+        self.assertIn("health.database_reachable===true", source)
 
 
 
