@@ -1,0 +1,96 @@
+name: PayPal live webhook verification
+
+on:
+  push:
+    branches:
+      - validation-autoops-live-check-20261028
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Test PayPal signature verification security
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+          PAYPAL_CLIENT_ID: ""
+          PAYPAL_CLIENT_SECRET: ""
+          PAYPAL_WEBHOOK_ID: ""
+        run: python -m unittest discover -s tests -p 'test_paypal_webhook.py' -v
+      - name: Test duplicate webhook idempotency
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+          PAYPAL_CLIENT_ID: ""
+          PAYPAL_CLIENT_SECRET: ""
+          PAYPAL_WEBHOOK_ID: ""
+        run: python -m unittest discover -s tests -p 'test_paypal_duplicate_webhook.py' -v
+
+  production-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check production health endpoint without exposing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoops-hub-production.onrender.com"
+          success=0
+          for attempt in $(seq 1 12); do
+            code=$(curl --connect-timeout 10 --max-time 20 --silent --show-error --output health.json --write-out '%{http_code}' "$base/api/v1/health" || true)
+            if [ "$code" = "200" ]; then
+              success=1
+              break
+            fi
+            echo "Health attempt $attempt returned HTTP ${code:-network-error}; retrying."
+            sleep 10
+          done
+          if [ "$success" -ne 1 ]; then
+            echo "Production health endpoint could not return HTTP 200."
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          with open("health.json", encoding="utf-8") as f:
+              health = json.load(f)
+          print(json.dumps(health, sort_keys=True))
+          expected = {
+              "status": "ok",
+              "database_configured": True,
+              "database_reachable": True,
+              "payment_mode": "live",
+              "paypal_credentials_configured": True,
+              "paypal_checkout_enabled": True,
+          }
+          failures = [f"{key} expected {value!r}, got {health.get(key)!r}"
+                      for key, value in expected.items() if health.get(key) is not value and health.get(key) != value]
+          if failures:
+              raise SystemExit("Production readiness failed: " + "; ".join(failures))
+          PY
+      - name: Confirm unsigned webhook is rejected
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoops-hub-production.onrender.com"
+          code=$(curl --connect-timeout 10 --max-time 30 --silent --show-error \
+            --output webhook.json --write-out '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' \
+            --data '{"id":"AUTOOPS-UNSIGNED-SECURITY-CHECK","event_type":"PAYMENT.CAPTURE.COMPLETED","resource":{}}' \
+            "$base/api/v1/payments/paypal-webhook")
+          echo "Unsigned webhook HTTP status: $code"
+          cat webhook.json
+          if [ "$code" != "401" ]; then
+            echo "Expected unsigned webhook to be rejected with HTTP 401."
+            exit 1
+          fi
+          echo "PASS: unsigned webhook was rejected."
