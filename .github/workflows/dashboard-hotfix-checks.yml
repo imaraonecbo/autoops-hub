@@ -1,0 +1,63 @@
+name: AutoOps dashboard hotfix checks
+
+on:
+  push:
+    branches:
+      - autoops-dashboard-hotfix-20261029
+  pull_request:
+    branches:
+      - production-paypal-live-20261028
+
+permissions:
+  contents: read
+
+jobs:
+  syntax-and-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Extract dashboard JavaScript and validate syntax
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          source = Path("backend/main.py").read_text(encoding="utf-8")
+          tree = ast.parse(source)
+          html = None
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "HTMLResponse" and node.args:
+                  arg = node.args[0]
+                  if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and "<script>" in arg.value:
+                      html = arg.value
+                      break
+          if html is None:
+              raise SystemExit("Could not find embedded dashboard HTML.")
+          script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+          Path("/tmp/autoops-dashboard.js").write_text(script, encoding="utf-8")
+          print(f"Extracted {len(script)} JavaScript characters.")
+          PY
+          node --check /tmp/autoops-dashboard.js
+      - name: Run webhook security unit tests
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+          PAYPAL_CLIENT_ID: ""
+          PAYPAL_CLIENT_SECRET: ""
+          PAYPAL_WEBHOOK_ID: ""
+        run: python -m unittest discover -s tests -p 'test_paypal_webhook.py' -v
+      - name: Run duplicate webhook regression test
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+          PAYPAL_CLIENT_ID: ""
+          PAYPAL_CLIENT_SECRET: ""
+          PAYPAL_WEBHOOK_ID: ""
+        run: python -m unittest discover -s tests -p 'test_paypal_duplicate_webhook.py' -v
