@@ -778,11 +778,11 @@ async def customer_portal():
 <button class="nav-link" data-view="settings"><span class="ico">⚙</span>Settings</button>
 </nav></div>
 <div class="sidebar-spacer"></div>
-<div class="side-status"><div class="status-line"><span class="dot"></span><span id="sideEnvTitle">Sandbox environment</span></div><p id="sideEnvCopy">Test orders only. Live billing is not enabled for this workspace.</p></div>
+<div class="side-status"><div class="status-line"><span class="dot"></span><span>Account security</span></div><p>Your reports are private to your signed-in account.</p></div>
 <div class="side-foot">AUTOMATION WORKSPACE<br>Secure account · Private reports</div>
 </aside>
 <main class="main">
-<header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="menuBtn" aria-label="Open navigation">☰</button><div class="breadcrumbs">AutoOps Hub <span style="color:#506680">/</span> <strong id="crumbTitle">Overview</strong></div></div><div class="top-actions"><span class="env-pill" id="topEnvPill"><span class="dot"></span>Payment configuration</span><div class="user-chip"><div class="avatar" id="topAvatar">A</div><div class="user-detail"><strong id="topUserName">Guest workspace</strong><small id="topUserMeta">Sign in to sync reports</small></div></div></div></header>
+<header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="menuBtn" aria-label="Open navigation">☰</button><div class="breadcrumbs">AutoOps Hub <span style="color:#506680">/</span> <strong id="crumbTitle">Overview</strong></div></div><div class="top-actions"><span class="env-pill"><span class="dot"></span>Secure workspace</span><div class="user-chip"><div class="avatar" id="topAvatar">A</div><div class="user-detail"><strong id="topUserName">Guest workspace</strong><small id="topUserMeta">Sign in to sync reports</small></div></div></div></header>
 <section class="view active" id="view-overview" data-page="overview">
 <div class="page-head"><div><div class="eyebrow">Workspace overview</div><h1>Good work starts with clean data.</h1><p>Run repeatable CSV cleanup jobs, inspect data-quality results, and keep every report linked to your account. Your workspace gives you one place to process, review, and retrieve the outputs.</p></div><button class="btn" id="overviewStartJob">＋ Create a cleanup job</button></div>
 <div class="hero"><div class="hero-copy"><div class="eyebrow">DATA OPERATIONS · MADE PRACTICAL</div><h2>From raw spreadsheets to <span>decision-ready files.</span></h2><p>Standardize headers, normalize cell whitespace, remove blank or duplicate rows on eligible tiers, and produce a saved output with a transparent quality summary. No inflated promises — just a clear workflow and a report you can retrieve.</p><div class="hero-actions"><button class="btn" id="heroJobBtn">Start a CSV job <span>→</span></button><button class="btn secondary" id="heroPlansBtn">Compare plans</button></div></div>
@@ -791,8 +791,7 @@ async def customer_portal():
 <article class="metric"><div class="metric-label">Saved jobs</div><div class="metric-row"><div><div class="metric-value" id="metricJobs">—</div><div class="metric-note">Jobs in your report history</div></div><div class="metric-symbol">▤</div></div></article>
 <article class="metric"><div class="metric-label">Current access</div><div class="metric-row"><div><div class="metric-value" id="metricTier" style="font-size:20px">Guest</div><div class="metric-note" id="metricTierNote">Sign in to view your tier</div></div><div class="metric-symbol">◇</div></div></article>
 <article class="metric"><div class="metric-label">Latest report</div><div class="metric-row"><div><div class="metric-value" id="metricLatest" style="font-size:16px">—</div><div class="metric-note" id="metricLatestNote">No job completed yet</div></div><div class="metric-symbol">↗</div></div></article>
-<article class="metric"><div class="metric-label">Payment mode</div><div class="metric-row"><div><div class="metric-value" id="paymentModeMetric" style="font-size:20px">Checking</div><div class="metric-note" id="paymentModeMetricNote">Verifying server configuration</div></div><div class="metric-symbol">◎</div></div></article>
-</div>
+ </div>
 <div class="section-title"><div><h2>Capabilities in this workspace</h2><p>Features customers can use in the current CSV cleanup service.</p></div><button class="btn ghost small" data-go="billing">View plan limits</button></div>
 <div class="grid service-grid">
 <article class="service"><div class="service-icon">↔</div><h3>Normalize headers and values</h3><p>Clean header spacing, lowercase column labels, replace header spaces with underscores, and trim cell whitespace.</p><div class="meta">CORE CSV CLEANUP</div></article>
@@ -809,14 +808,14 @@ async def customer_portal():
 <section class="card"><div class="section-title" style="margin:0 0 13px"><div><h3>Report history</h3><p>Only reports belonging to your account are shown.</p></div><button class="btn secondary small" id="refreshBtn">↻ Refresh</button></div><div id="reportList" class="report-empty">Sign in to load your private report history.</div><div id="reportResult"></div></section></div>
 </section>
 <section class="view" id="view-billing" data-page="billing">
-<div class="page-head"><div><div class="eyebrow">Access &amp; billing</div><h1>Plans built around real work.</h1><p>Every plan includes the core CSV cleanup workflow. Higher tiers increase the permitted file size and add distinct cleanup and data-quality capabilities.</p></div><span class="env-pill" id="billingEnvPill"><span class="dot"></span>PayPal checkout</span></div>
+<div class="page-head"><div><div class="eyebrow">Access &amp; billing</div><h1>Plans built around real work.</h1><p>Every plan includes the core CSV cleanup workflow. Higher tiers increase the permitted file size and add distinct cleanup and data-quality capabilities.</p></div></div>
 <div class="plan-note"><strong>One-time payment notice:</strong> Each plan is a single purchase, not a recurring subscription. Job credits are granted only after the server verifies a completed PayPal capture and records the transaction against the signed-in customer.</div>
 <div class="grid pricing">
 <article class="price-card" data-price-tier="tier_1_51"><div class="plan-label">BASIC · ESSENTIAL CLEANUP</div><div class="price">$79</div><div class="once">USD · one-time payment</div><p class="feature-note">For dependable, everyday CSV preparation.</p><ul><li>Standardize CSV headers and trim cell whitespace</li><li>Up to 2,500 data rows per file</li><li>30 jobs included per purchase</li><li>Private saved reports and cleaned CSV output</li><li>Historical report retrieval</li></ul><button class="btn plan-select" data-tier="tier_1_51">Select Basic</button></article>
 <article class="price-card featured" data-price-tier="tier_2_83"><div class="plan-label">SCALE · TECHNICAL OPERATIONS</div><div class="price">$149</div><div class="once">USD · one-time Sandbox test purchase</div><p class="feature-note">For teams working with spreadsheets, JSON payloads and operational logs.</p><ul><li><b>Everything in Basic, plus:</b></li><li>Multi-sheet Excel (.xlsx) cleaning and consolidation</li><li>JSON payload formatting and error-field scan</li><li>Filter JSON event arrays to error/exception records</li><li>Server log parsing and structured stack-trace summaries</li><li>Blank-row removal, exact deduplication and missing-value counts</li><li>Up to 25,000 rows or entries per file</li><li>300 jobs included per purchase</li></ul><button class="btn plan-select" data-tier="tier_2_83">Select Scale</button></article>
 <article class="price-card" data-price-tier="tier_3_129"><div class="plan-label">ULTIMATE · MERCHANT &amp; ENTERPRISE</div><div class="price">$299</div><div class="once">USD · one-time Sandbox test purchase</div><p class="feature-note">For high-volume catalogs, order exports, and data-quality review.</p><ul><li><b>Everything in Scale, plus:</b></li><li>Catalog SKU, price and inventory standardization for sync-ready exports (external store writes are not enabled)</li><li>Order price, currency, address and phone normalization</li><li>User export email validation and duplicate identity resolution</li><li>Deep type inference, anomaly detection and quality flags</li><li>Enterprise API route and retrievable historical reports</li><li>Up to 250,000 rows or entries per file</li><li>1,500 jobs included per purchase</li></ul><button class="btn plan-select" data-tier="tier_3_129">Select Ultimate</button></article>
 </div>
-<div class="workspace" style="margin-top:16px"><section class="card"><h3>Complete PayPal checkout</h3><p class="sub">Sign in to AutoOps Hub first. You will be redirected to PayPal to approve the one-time order in the environment shown above.</p><div class="field"><label for="tier">SELECT PLAN</label><select id="tier"><option value="tier_1_51">Basic — $79 USD</option><option value="tier_2_83">Scale — $149 USD</option><option value="tier_3_129">Ultimate — $299 USD</option></select></div><button class="btn block" id="checkoutBtn">Continue to PayPal Sandbox →</button><div class="notice" id="billingNotice" role="status" aria-live="polite"></div></section>
+<div class="workspace" style="margin-top:16px"><section class="card"><h3>Complete PayPal checkout</h3><p class="sub">Sign in to AutoOps Hub first. You will be redirected to PayPal to approve the one-time order in the environment shown above.</p><div class="field"><label for="tier">SELECT PLAN</label><select id="tier"><option value="tier_1_51">Basic — $79 USD</option><option value="tier_2_83">Scale — $149 USD</option><option value="tier_3_129">Ultimate — $299 USD</option></select></div><button class="btn block" id="checkoutBtn" disabled>Checking secure checkout…</button><div class="notice" id="billingNotice" role="status" aria-live="polite"></div></section>
 <section class="card"><h3>Billing clarity</h3><p class="sub">The current integration creates a one-time PayPal order. Automatic renewals, invoices, refunds, tax calculation, and a customer-facing payment management portal are not represented as available features yet.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Order is created by the server and associated with the signed-in account.</span></div><div class="security-item"><span class="security-check">✓</span><span>Capture amount and plan are checked before a tier upgrade is applied.</span></div><div class="security-item"><span class="security-check">!</span><span>Live processing remains disabled until a complete end-to-end test and merchant verification.</span></div></div></section></div>
 </section>
 <section class="view" id="view-settings" data-page="settings">
@@ -830,11 +829,11 @@ async def customer_portal():
 <div class="setting-row"><div><strong>Compact workspace</strong><p>Reduce card spacing so more information fits on screen.</p></div><label class="switch"><input id="compactMode" type="checkbox"><span class="switch-track"></span></label></div>
 <div class="setting-row"><div><strong>Show completed job details first</strong><p>Open the latest saved report automatically when loading history.</p></div><label class="switch"><input id="autoOpenLatest" type="checkbox"><span class="switch-track"></span></label></div>
 <div class="notice show" id="preferenceNotice">Changes apply immediately and stay in this browser.</div></section>
-<section class="card"><h3>Payment environment</h3><p class="sub">PayPal credentials are stored server-side only. Never place a client secret or merchant credential in browser-accessible settings.</p><div class="setting-row"><div><strong>Active checkout mode</strong><p id="activeCheckoutMode">Checking the configured PayPal environment…</p></div><span class="tag" id="activeCheckoutTag">Checking</span></div><div class="setting-row"><div><strong>Merchant receiving account</strong><p>Determined by the PayPal REST app and merchant configuration used by the server. Not verified as live.</p></div><span class="tag">Not verified</span></div><a href="https://dashboard.render.com/web/srv-db7kcpuk1f9s7382q7q0" class="btn secondary block" target="_blank" rel="noopener">Open server configuration in Render ↗</a></section>
+
 <section class="card"><h3>Security &amp; privacy</h3><p class="sub">Controls that protect customer accounts and report history.</p><div class="security-list"><div class="security-item"><span class="security-check">✓</span><span>Account endpoints verify the Supabase session token server-side.</span></div><div class="security-item"><span class="security-check">✓</span><span>Report queries are scoped to the signed-in user's account.</span></div><div class="security-item"><span class="security-check">✓</span><span>PayPal client secrets belong in Render environment variables, never HTML, JavaScript, or public repository files.</span></div></div></section>
 </div>
 </section>
-<footer class="footer"><span>AutoOps Hub · Operations workspace</span><span>One-time checkout only · payment capture is verified server-side before account credits are granted.</span></footer>
+<footer class="footer"><span>AutoOps Hub · Customer workspace</span><span>One-time checkout only · payment capture is verified server-side before account credits are granted.</span></footer>
 </main>
 </div>
 <script>
@@ -867,14 +866,19 @@ async function configurePaymentMode(){
     const activeTag=$('activeCheckoutTag');
     if(activeTag)activeTag.textContent=paymentsEnabled?'Enabled':'Disabled';
     const button=$('checkoutBtn');
-    if(button&&!paymentsEnabled){button.title='Checkout is disabled until PayPal and database configuration are verified.';button.setAttribute('aria-disabled','true')}
-    if(button&&paymentsEnabled){button.removeAttribute('aria-disabled');button.title='Continue to '+(paymentMode==='live'?'PayPal':'PayPal Sandbox')}
+    if(button){
+      button.disabled=!paymentsEnabled;
+      button.textContent=paymentsEnabled?'Continue to '+(paymentMode==='live'?'PayPal':'PayPal Sandbox')+' →':'Checkout temporarily unavailable';
+      button.title=paymentsEnabled?'Continue to '+(paymentMode==='live'?'PayPal':'PayPal Sandbox'):'Checkout is disabled until payment and database readiness are verified.';
+      if(paymentsEnabled)button.removeAttribute('aria-disabled');else button.setAttribute('aria-disabled','true');
+    }
   }catch(e){
     paymentsEnabled=false;
     const pill=$('topEnvPill');
     if(pill)pill.innerHTML='<span class="dot"></span>Payment status unavailable';
     const sideCopy=$('sideEnvCopy');
-    if(sideCopy)sideCopy.textContent='Checkout availability could not be verified.';
+    if(sideCopy)sideCopy.textContent='Your reports are private to your signed-in account.';
+    const button=$('checkoutBtn');if(button){button.disabled=true;button.textContent='Checkout temporarily unavailable';button.setAttribute('aria-disabled','true');}
   }
 }
 function notice(el,message,type){if(!el)return;el.textContent=message;el.className='notice show'+(type?' '+type:'')}
