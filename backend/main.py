@@ -699,6 +699,110 @@ def _set_session_cookie(response, auth_data: Dict[str, Any]) -> None:
         max_age=int(auth_data.get("expires_in") or 3600), path="/",
     )
 
+
+def _marketing_fields(payload: Dict[str, Any]) -> Dict[str, str]:
+    """Normalize non-sensitive campaign tags supplied by the customer-facing page."""
+    payload = payload if isinstance(payload, dict) else {}
+    allowed = ("source", "medium", "campaign", "content", "term", "landing_path", "referrer_host")
+    result: Dict[str, str] = {}
+    for key in allowed:
+        raw = payload.get(key)
+        if not isinstance(raw, str):
+            continue
+        value = raw.strip()
+        if key in ("source", "medium", "campaign"):
+            value = value or {"source": "direct", "medium": "none", "campaign": "unattributed"}[key]
+        if value:
+            result[key] = value[:400 if key == "landing_path" else 160]
+    result.setdefault("source", "direct")
+    result.setdefault("medium", "none")
+    result.setdefault("campaign", "unattributed")
+    return result
+
+
+def _record_marketing_attribution(user_id: str, fields: Dict[str, str]) -> None:
+    """Persist first and last campaign touch without storing email or raw referrer URLs."""
+    if not supabase or not user_id:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    source = fields.get("source", "direct")
+    medium = fields.get("medium", "none")
+    campaign = fields.get("campaign", "unattributed")
+    first = {
+        "user_id": user_id,
+        "first_source": source,
+        "first_medium": medium,
+        "first_campaign": campaign,
+        "first_content": fields.get("content"),
+        "first_term": fields.get("term"),
+        "first_landing_path": fields.get("landing_path"),
+        "first_referrer_host": fields.get("referrer_host"),
+        "first_touch_at": now,
+        "last_source": source,
+        "last_medium": medium,
+        "last_campaign": campaign,
+        "last_content": fields.get("content"),
+        "last_term": fields.get("term"),
+        "last_landing_path": fields.get("landing_path"),
+        "last_referrer_host": fields.get("referrer_host"),
+        "last_touch_at": now,
+        "updated_at": now,
+    }
+    try:
+        existing = supabase.table("marketing_attributions").select("user_id").eq("user_id", user_id).limit(1).execute()
+        if existing.data:
+            # A direct checkout must not overwrite a known campaign touch.
+            if source == "direct" and campaign == "unattributed":
+                return
+            update = {key: value for key, value in first.items() if key.startswith("last_")}
+            update["updated_at"] = now
+            supabase.table("marketing_attributions").update(update).eq("user_id", user_id).execute()
+        else:
+            supabase.table("marketing_attributions").insert(first).execute()
+    except Exception:
+        logger.exception("Marketing attribution could not be recorded for user %s.", user_id)
+
+
+def _record_marketing_event(
+    user_id: Optional[str],
+    event_key: str,
+    event_name: str,
+    fields: Optional[Dict[str, str]] = None,
+    value: Optional[float] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Record idempotent conversion events; never let analytics interrupt checkout or signup."""
+    if not supabase:
+        return
+    fields = fields or {}
+    try:
+        if user_id and not fields:
+            saved = supabase.table("marketing_attributions").select(
+                "last_source,last_medium,last_campaign"
+            ).eq("user_id", user_id).limit(1).execute()
+            if saved.data:
+                row = saved.data[0]
+                fields = {
+                    "source": row.get("last_source") or "direct",
+                    "medium": row.get("last_medium") or "none",
+                    "campaign": row.get("last_campaign") or "unattributed",
+                }
+        record = {
+            "event_key": event_key[:200],
+            "event_name": event_name,
+            "user_id": user_id,
+            "source": fields.get("source", "direct")[:160],
+            "medium": fields.get("medium", "none")[:160],
+            "campaign": fields.get("campaign", "unattributed")[:160],
+            "value": value,
+            "currency": "USD",
+            "metadata": metadata or {},
+        }
+        supabase.table("marketing_events").upsert(record, on_conflict="event_key").execute()
+    except Exception:
+        logger.exception("Marketing event %s could not be recorded.", event_name)
+
+
 @app.get("/api/v1/health")
 async def health_check():
     """Non-sensitive readiness probe; checks actual PostgREST connectivity."""
@@ -836,7 +940,8 @@ function notice(el,message,type){if(!el)return;el.textContent=message;el.classNa
 function errorMessage(data,status){if(data&&typeof data.detail==='string')return data.detail;if(data&&data.detail&&typeof data.detail==='object')return data.detail.message||JSON.stringify(data.detail);if(data&&data.message)return data.message;return 'Request failed ('+status+'). Please try again.'}
 async function api(path,options){const response=await fetch(path,Object.assign({credentials:'same-origin'},options||{}));let data={};try{data=await response.json()}catch(e){}if(!response.ok)throw new Error(errorMessage(data,response.status));return data}
 async function busy(button,work){if(!button||button.disabled)return;const old=button.textContent;button.disabled=true;button.textContent='Working…';try{await work()}catch(e){const target=(button.id==='submitJobBtn'||button.id==='refreshBtn')?jobNotice:(button.id==='checkoutBtn'||button.classList.contains('plan-select'))?billingNotice:(button.id==='signupBtn'||button.id==='loginBtn'||button.id==='logoutBtn')?settingsAccountNotice:accountNotice;notice(target,e.message||'Something went wrong. Please try again.','error')}finally{button.disabled=false;button.textContent=old}}
-function credentials(){const email=$('email').value.trim(),password=$('password').value;if(!email||email.indexOf('@')<1)throw new Error('Enter a valid email address first.');if(password.length<10)throw new Error('Use a password of at least 10 characters.');return {email:email,password:password}}
+function marketingAttribution(){const q=new URLSearchParams(window.location.search);let referrerHost='';try{referrerHost=window.document.referrer?new URL(window.document.referrer).hostname:''}catch(e){}const get=(key)=>{const v=q.get('utm_'+key);return v?v.slice(0,160):''};return {source:get('source')||'direct',medium:get('medium')||'none',campaign:get('campaign')||'unattributed',content:get('content'),term:get('term'),landing_path:(window.location.pathname||'/').slice(0,400),referrer_host:referrerHost.slice(0,160)}}
+function credentials(){const email=$('email').value.trim(),password=$('password').value;if(!email||email.indexOf('@')<1)throw new Error('Enter a valid email address first.');if(password.length<10)throw new Error('Use a password of at least 10 characters.');return {email:email,password:password,marketing:marketingAttribution()}}
 function setNavView(view){if(!$( 'view-'+view))view='overview';document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));document.querySelectorAll('.nav-link').forEach(el=>el.classList.toggle('active',el.dataset.view===view));const names={overview:'Overview',jobs:'Jobs & Reports',billing:'Billing & Plans',settings:'Settings'};$('crumbTitle').textContent=names[view]||'Overview';if(window.location.hash!=='#'+view)history.replaceState({},'',window.location.pathname+window.location.search+'#'+view);$('sidebar').classList.remove('open');$('navOverlay').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'})}
 document.querySelectorAll('.nav-link').forEach(button=>button.addEventListener('click',()=>setNavView(button.dataset.view)));
 document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>setNavView(button.dataset.go)));
@@ -848,7 +953,7 @@ function setSignedOutUI(){currentUser=null;currentProfile=null;authControls.hidd
 async function loadAccount(silent){try{const data=await api('/api/v1/auth/me');setSignedInUI(data);if(!silent)notice(accountNotice,'You are signed in. Choose a plan or run a CSV job.','good');if(settingsAccountNotice)notice(settingsAccountNotice,'Signed in as '+(data.user.email||data.user.id)+'.','good');return true}catch(e){setSignedOutUI();return false}}
 async function authenticate(mode){const body=credentials();const data=await api('/api/v1/auth/'+mode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(data.user){setNavView('overview');await loadAccount(true);await loadReports();notice(accountNotice,data.message||'Signed in successfully.','good')}else{notice(settingsAccountNotice,data.message||'Account created. Check your email to confirm it.','good')}}
 async function logout(){await api('/api/v1/auth/logout',{method:'POST'});setSignedOutUI();reportsCache=[];reportList.className='report-empty';reportList.textContent='Sign in to load your private report history.';reportResult.replaceChildren();notice(settingsAccountNotice,'You have signed out. Sign in again to access your private reports or checkout.','good')}
-async function checkout(){await configurePaymentMode();if(!paymentsEnabled)throw new Error('Checkout is disabled because payment or database readiness has not been verified. Please try again after the service is configured.');const signedIn=await loadAccount(true);if(!signedIn){setNavView('settings');throw new Error('Please sign in to AutoOps Hub first. The order will be linked to the account that is signed in.')}const data=await api('/api/v1/payments/paypal/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:$('tier').value})});if(!data.approval_url)throw new Error('PayPal did not return an approval link. Check the configured credentials and try again.');let approval;try{approval=new URL(data.approval_url)}catch(e){throw new Error('PayPal returned an invalid approval URL. No redirect was attempted.')}const allowedHosts=paymentMode==='live'?['www.paypal.com','paypal.com']:['www.sandbox.paypal.com','sandbox.paypal.com'];if(approval.protocol!=='https:'||!allowedHosts.includes(approval.hostname))throw new Error('PayPal returned an approval URL for the wrong payment environment. No redirect was attempted.');notice(billingNotice,(paymentMode==='live'?'Live':'Sandbox')+' order created for 
+async function checkout(){await configurePaymentMode();if(!paymentsEnabled)throw new Error('Checkout is disabled because payment or database readiness has not been verified. Please try again after the service is configured.');const signedIn=await loadAccount(true);if(!signedIn){setNavView('settings');throw new Error('Please sign in to AutoOps Hub first. The order will be linked to the account that is signed in.')}const data=await api('/api/v1/payments/paypal/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:$('tier').value,marketing:marketingAttribution()})});if(!data.approval_url)throw new Error('PayPal did not return an approval link. Check the configured credentials and try again.');let approval;try{approval=new URL(data.approval_url)}catch(e){throw new Error('PayPal returned an invalid approval URL. No redirect was attempted.')}const allowedHosts=paymentMode==='live'?['www.paypal.com','paypal.com']:['www.sandbox.paypal.com','sandbox.paypal.com'];if(approval.protocol!=='https:'||!allowedHosts.includes(approval.hostname))throw new Error('PayPal returned an approval URL for the wrong payment environment. No redirect was attempted.');notice(billingNotice,(paymentMode==='live'?'Live':'Sandbox')+' order created for 
 async function captureReturned(){const orderId=new URLSearchParams(window.location.search).get('token');if(!orderId)throw new Error('No PayPal order token was found. Start checkout and return here after approving the Sandbox payment.');const data=await api('/api/v1/payments/paypal/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:orderId})});window.history.replaceState({},'',window.location.pathname+'#billing');notice(billingNotice,data.message||'Payment verification completed.','good');await loadAccount(true);await loadReports()}
 async function handleAuthCallback(){const hash=new URLSearchParams(window.location.hash.replace(/^#/,''));const query=new URLSearchParams(window.location.search);const accessToken=hash.get('access_token')||query.get('access_token');const authError=hash.get('error_description')||query.get('error_description')||hash.get('error')||query.get('error');if(authError)throw new Error('Email confirmation did not complete: '+authError.replace(/\+/g,' '));if(accessToken){const data=await api('/api/v1/auth/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:accessToken})});window.history.replaceState({},'',window.location.pathname+'#overview');notice(accountNotice,data.message||'Email confirmed. You are signed in.','good');await loadAccount(true);await loadReports();return true}if(query.get('auth')==='confirmed'){setNavView('settings');notice(settingsAccountNotice,'Email confirmation completed. Sign in below to continue.','good');window.history.replaceState({},'',window.location.pathname+'#settings');return true}return false}
 function downloadReport(name,value,format){const ext=(format||'csv').toLowerCase()==='json'?'json':'csv';const blob=new Blob([value],{type:ext==='json'?'application/json;charset=utf-8':'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(name||'autoops-report').replace(/[^a-z0-9_.-]/gi,'_')+'.'+ext;document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}
@@ -881,9 +986,14 @@ async def auth_signup(payload: Dict[str, Any], response: Response):
     confirmation_redirect = f"{public_app_url}/?auth=confirmed"
     auth_path = "signup?redirect_to=" + quote(confirmation_redirect, safe="")
     auth_data = await _supabase_auth_call(auth_path, {"email": email, "password": password})
+    user_id = (auth_data.get("user") or {}).get("id")
+    marketing = _marketing_fields(payload.get("marketing") or {})
+    if user_id:
+        _record_marketing_attribution(str(user_id), marketing)
+        _record_marketing_event(str(user_id), f"signup:{user_id}", "signup_completed", marketing, metadata={"method": "email"})
     if auth_data.get("access_token"):
         _set_session_cookie(response, auth_data)
-        return {"message": "Account created and signed in.", "user": {"id": auth_data.get("user", {}).get("id"), "email": email}}
+        return {"message": "Account created and signed in.", "user": {"id": user_id, "email": email}}
     return {"message": "Account created. Check your email to confirm it, then sign in.", "user": None}
 
 @app.post("/api/v1/auth/session")
@@ -957,6 +1067,7 @@ async def create_paypal_order(request: Request, payload: Dict[str, Any]):
     if not supabase:
         raise HTTPException(status_code=503, detail="Database is not connected.")
     tier = str(payload.get("tier", ""))
+    marketing = _marketing_fields(payload.get("marketing") or {})
     if tier not in TIERS:
         raise HTTPException(status_code=400, detail="Unknown plan.")
     profile = supabase.table("profiles").select("user_id").eq("user_id", user["user_id"]).execute()
@@ -996,6 +1107,11 @@ async def create_paypal_order(request: Request, payload: Dict[str, Any]):
             "paypal_order_id": order_id, "user_id": user["user_id"],
             "tier": tier, "amount": float(amount), "status": "pending"
         }).execute()
+        _record_marketing_attribution(str(user["user_id"]), marketing)
+        _record_marketing_event(
+            str(user["user_id"]), f"checkout:{order_id}", "checkout_started",
+            marketing, value=float(amount), metadata={"tier": tier},
+        )
         return {"order_id": order_id, "approval_url": approval, "tier": tier, "amount": amount, "currency": "USD"}
     except HTTPException:
         raise
@@ -1055,6 +1171,10 @@ async def capture_paypal_order(request: Request, payload: Dict[str, Any]):
         supabase.table("paypal_orders").update({
             "status": "captured", "capture_id": cap["id"], "captured_at": datetime.now(timezone.utc).isoformat()
         }).eq("paypal_order_id", order_id).execute()
+        _record_marketing_event(
+            str(user["user_id"]), f"purchase:{cap['id']}", "purchase_completed",
+            value=float(saved["amount"]), metadata={"tier": saved["tier"], "capture_id": cap["id"]},
+        )
         return {"success": True, "message": "Sandbox payment captured and account tier updated.", "tier": saved["tier"], "capture_id": cap["id"], "database_result": applied.data}
     except HTTPException:
         raise
