@@ -516,6 +516,10 @@ async def paypal_webhook(request: Request):
             "capture_id": capture_id,
             "captured_at": datetime.now(timezone.utc).isoformat(),
         }).eq("paypal_order_id", order_id).execute()
+        _record_marketing_event(
+            str(saved["user_id"]), f"purchase:{capture_id}", "purchase_completed",
+            value=amount_val, metadata={"tier": tier, "capture_id": capture_id},
+        )
         logger.info("Verified PayPal capture applied to server-created order %s.", order_id)
         return WebhookResponse(success=True, message="Verified PayPal capture recorded and account tier synchronized.",
                                details={"transaction_id": capture_id, "user_id": saved["user_id"],
@@ -776,7 +780,12 @@ def _record_marketing_event(
         return
     fields = fields or {}
     try:
-        if user_id and not fields:
+        if user_id and (
+            not fields or (
+                fields.get("source", "direct") == "direct"
+                and fields.get("campaign", "unattributed") == "unattributed"
+            )
+        ):
             saved = supabase.table("marketing_attributions").select(
                 "last_source,last_medium,last_campaign"
             ).eq("user_id", user_id).limit(1).execute()
