@@ -37,7 +37,8 @@ jobs:
     environment:
       name: cloudflare-write
     env:
-      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_WRITE_TOKEN }}
+      CF_READ_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_WRITE_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_WRITE_TOKEN }}
       CF_ACCOUNT_ID: "cb35584737ab3f7fa4ceafc3d19214ab"
       CF_PROJECT_NAME: "autoops-hub"
       OPERATION: ${{ inputs.operation || 'inspect' }}
@@ -48,20 +49,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -z "${CF_API_TOKEN}" ]]; then
-            echo "::error::Environment secret CLOUDFLARE_PAGES_WRITE_TOKEN is unavailable. Check the cloudflare-write environment secret name and approval rules."
+          if [[ -z "${CF_READ_TOKEN}" ]]; then
+            echo "::error::Repository secret CLOUDFLARE_API_TOKEN is missing."
             exit 1
+          fi
+          if [[ -z "${CF_WRITE_TOKEN}" ]]; then
+            echo "::warning::Environment secret CLOUDFLARE_PAGES_WRITE_TOKEN is unavailable. Inspection can continue, but write operations will remain disabled."
           fi
 
           api_request() {
             local method="$1"
             local endpoint="$2"
             local payload="${3:-}"
+            local auth_token="${4:-${CF_READ_TOKEN}}"
             local response http_code body
             local -a args
             args=(--silent --show-error --connect-timeout 15 --max-time 60
               --request "${method}"
-              --header "Authorization: Bearer ${CF_API_TOKEN}"
+              --header "Authorization: Bearer ${auth_token}"
               --header "Accept: application/json")
             if [[ -n "${payload}" ]]; then
               args+=(--header "Content-Type: application/json" --data "${payload}")
@@ -88,19 +93,30 @@ jobs:
           echo "## Cloudflare Pages protected operations" >> "${GITHUB_STEP_SUMMARY}"
           echo "- Project: ${CF_PROJECT_NAME}" >> "${GITHUB_STEP_SUMMARY}"
           echo "- Requested operation: ${OPERATION}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- Write token: present (value withheld)" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Read token: present (value withheld)" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Write token: ${CF_WRITE_TOKEN:+present (value withheld)}" >> "${GITHUB_STEP_SUMMARY}"
 
-          echo "Verifying Cloudflare token..."
-          token_json="$(api_request GET "/user/tokens/verify")"
-          token_status="$(jq -r '.result.status // "unknown"' <<< "${token_json}")"
-          echo "- Token status: ${token_status}" | tee -a "${GITHUB_STEP_SUMMARY}"
+          if [[ -n "${CF_WRITE_TOKEN}" ]]; then
+            echo "Verifying Cloudflare write token..."
+            token_json="$(api_request GET "/user/tokens/verify" "" "${CF_WRITE_TOKEN}")"
+            token_status="$(jq -r '.result.status // "unknown"' <<< "${token_json}")"
+            echo "- Write token status: ${token_status}" | tee -a "${GITHUB_STEP_SUMMARY}"
+            if [[ "${token_status}" != "active" ]]; then
+              echo "::error::Cloudflare write token is not active."
+              exit 1
+            fi
 
-          if [[ "${token_status}" != "active" ]]; then
-            echo "::error::Cloudflare token is not active."
-            exit 1
+            if api_request GET "/accounts/${CF_ACCOUNT_ID}/pages/projects" "" "${CF_WRITE_TOKEN}" >/dev/null 2>&1; then
+              write_scope_status="accepted"
+            else
+              write_scope_status="rejected"
+            fi
+          else
+            write_scope_status="missing"
           fi
+          echo "- Write token Pages API scope check: ${write_scope_status}" | tee -a "${GITHUB_STEP_SUMMARY}"
 
-          echo "Reading Pages project list..."
+          echo "Reading Pages project list with the read-only token..."
           projects_json="$(api_request GET "/accounts/${CF_ACCOUNT_ID}/pages/projects")"
           project_json="$(jq -c --arg name "${CF_PROJECT_NAME}" '.result[]? | select(.name == $name)' <<< "${projects_json}")"
           if [[ -z "${project_json}" ]]; then
@@ -214,7 +230,11 @@ jobs:
               exit 1
             fi
             echo "Submitting an explicit retry for failed deployment ${failed_short_id}..."
-            retry_json="$(api_request POST "/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}/deployments/${failed_id}/retry" '{}')"
+            if [[ "${write_scope_status}" != "accepted" ]]; then
+              echo "::error::The write token did not pass the Pages API account-scope check. No retry request was submitted."
+              exit 1
+            fi
+            retry_json="$(api_request POST "/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}/deployments/${failed_id}/retry" '{}' "${CF_WRITE_TOKEN}")"
             retry_id="$(jq -r '.result.id // empty' <<< "${retry_json}")"
             retry_url="$(jq -r '.result.url // empty' <<< "${retry_json}")"
             {
