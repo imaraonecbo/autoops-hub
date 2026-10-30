@@ -134,10 +134,11 @@ jobs:
               tee -a "${GITHUB_STEP_SUMMARY}"
           fi
 
-          latest_deployment_id="$(jq -r '.result[0].id // empty' <<< "${deployments_json}")"
+          failed_deployment_json="$(jq -c '[.result[]? | select(.latest_stage.status == "failure")][0] // empty' <<< "${deployments_json}")"
+          latest_deployment_id="$(jq -r '.id // empty' <<< "${failed_deployment_json}")"
           if [[ -n "${latest_deployment_id}" ]]; then
-            latest_stage_name="$(jq -r '.result[0].latest_stage.name // "unknown"' <<< "${deployments_json}")"
-            latest_stage_status="$(jq -r '.result[0].latest_stage.status // "unknown"' <<< "${deployments_json}")"
+            latest_stage_name="$(jq -r '.latest_stage.name // "unknown"' <<< "${failed_deployment_json}")"
+            latest_stage_status="$(jq -r '.latest_stage.status // "unknown"' <<< "${failed_deployment_json}")"
             echo "" >> "${GITHUB_STEP_SUMMARY}"
             echo "### Latest deployment failure analysis" >> "${GITHUB_STEP_SUMMARY}"
             echo "- Last stage: ${latest_stage_name} (${latest_stage_status})" | tee -a "${GITHUB_STEP_SUMMARY}"
