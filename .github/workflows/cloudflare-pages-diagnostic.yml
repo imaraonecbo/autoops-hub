@@ -142,10 +142,19 @@ jobs:
             echo "" >> "${GITHUB_STEP_SUMMARY}"
             echo "### Latest deployment failure analysis" >> "${GITHUB_STEP_SUMMARY}"
             echo "- Last stage: ${latest_stage_name} (${latest_stage_status})" | tee -a "${GITHUB_STEP_SUMMARY}"
+            stage_lines="$(jq -r '.stages[]? | "- " + (.name // "stage") + ": " + (.status // "unknown")' <<< "${failed_deployment_json}")"
+            if [[ -n "${stage_lines}" ]]; then
+              printf '%s\n' "${stage_lines}" | tee -a "${GITHUB_STEP_SUMMARY}"
+            fi
 
             if logs_json="$(api_get "/accounts/${CF_ACCOUNT_ID}/pages/projects/${project_name}/deployments/${latest_deployment_id}/history/logs")"; then
               total_log_lines="$(jq -r '.result.total // (.result.data | length) // 0' <<< "${logs_json}")"
+              includes_container_logs="$(jq -r '.result.includes_container_logs // false' <<< "${logs_json}")"
               echo "- Cloudflare returned ${total_log_lines} log entries." | tee -a "${GITHUB_STEP_SUMMARY}"
+              echo "- Container build logs included: ${includes_container_logs}" | tee -a "${GITHUB_STEP_SUMMARY}"
+
+              repository_count="$(jq --arg p '(repository not found|could not read from remote|authentication failed|access denied|permission to .* denied|fatal:|unable to access|failed to clone|clone failed|could not resolve host|connection timed out|http 403|http 404)' '[.result.data[]? | select((.line // "") | test($p; "i"))] | length' <<< "${logs_json}")"
+              echo "- Repository/clone error matches: ${repository_count}" | tee -a "${GITHUB_STEP_SUMMARY}"
 
               dependency_count="$(jq --arg p '(npm ERR|Could not resolve dependency|No matching version found|npm install failed|pip install failed|ModuleNotFoundError)' '[.result.data[]? | select((.line // "") | test($p; "i"))] | length' <<< "${logs_json}")"
               build_count="$(jq --arg p '(command not found|missing script|cannot find module|module not found|no such file|output directory|build failed)' '[.result.data[]? | select((.line // "") | test($p; "i"))] | length' <<< "${logs_json}")"
