@@ -255,9 +255,9 @@ jobs:
         run: |
           set -euo pipefail
           url="https://autoops-hub.pages.dev/"
-          response="$(curl --location --silent --show-error --connect-timeout 15 --max-time 45 --write-out \\n%{http_code}' "${url}")"
-          http_status="${response##*\\n'}"
-          html="${response%\\n'*}"
+          response="$(curl --location --silent --show-error --connect-timeout 15 --max-time 45 --write-out '|%{http_code}' "${url}")"
+          http_status="${response##*|}"
+          html="${response%|*}"
 
           echo "## Public Pages HTTP verification" >> "${GITHUB_STEP_SUMMARY}"
           echo "- URL: ${url}" >> "${GITHUB_STEP_SUMMARY}"
