@@ -217,10 +217,10 @@ jobs:
           matching_lines="$(jq -r '[.result.data[]?.line // empty | select(test("error|fatal|failed|denied|repository|clone|git|lfs|submodule|suspend|install|remote"; "i"))] | unique | .[-10:][]' <<< "${logs_json}" | sed -E 's#https?://[^/@ ]+:[^/@ ]+@#https://[REDACTED]@#g; s/(Bearer|token|password|secret)[=: ]+[^ ]+/\1=[REDACTED]/Ig; s/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g')"
           if [[ -n "${matching_lines}" ]]; then
             while IFS= read -r line; do
-              echo "- ${line}" >> "${GITHUB_STEP_SUMMARY}"
+              echo "- ${line}" | tee -a "${GITHUB_STEP_SUMMARY}"
             done <<< "${matching_lines}"
           else
-            echo "No matching error lines were returned by Cloudflare." >> "${GITHUB_STEP_SUMMARY}"
+            echo "No matching error lines were returned by Cloudflare." | tee -a "${GITHUB_STEP_SUMMARY}"
           fi
           echo "- Full raw logs are not copied to the public Actions summary." >> "${GITHUB_STEP_SUMMARY}"
 
@@ -247,3 +247,7 @@ jobs:
             echo ""
             echo "Inspection completed. No Pages settings or deployments were changed."
           fi
+
+          echo ""
+          echo "## Safe diagnostic summary"
+          cat "${GITHUB_STEP_SUMMARY}"
