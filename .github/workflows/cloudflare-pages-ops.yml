@@ -96,7 +96,15 @@ jobs:
 
           if [[ -n "${CF_WRITE_TOKEN}" ]]; then
             echo "Verifying Cloudflare write token..."
-            token_json="$(api_request GET "/user/tokens/verify" "" "${CF_WRITE_TOKEN}")"
+            if [[ "${CF_WRITE_TOKEN}" == cfat_* ]]; then
+              token_verify_endpoint="/accounts/${CF_ACCOUNT_ID}/tokens/verify"
+              token_kind="account-owned"
+            else
+              token_verify_endpoint="/user/tokens/verify"
+              token_kind="user-owned or legacy"
+            fi
+            echo "- Write token type: ${token_kind}" | tee -a "${GITHUB_STEP_SUMMARY}"
+            token_json="$(api_request GET "${token_verify_endpoint}" "" "${CF_WRITE_TOKEN}")"
             token_status="$(jq -r '.result.status // "unknown"' <<< "${token_json}")"
             echo "- Write token status: ${token_status}" | tee -a "${GITHUB_STEP_SUMMARY}"
             if [[ "${token_status}" != "active" ]]; then
@@ -105,14 +113,14 @@ jobs:
             fi
 
             if api_request GET "/accounts/${CF_ACCOUNT_ID}/pages/projects" "" "${CF_WRITE_TOKEN}" >/dev/null 2>&1; then
-              write_scope_status="accepted"
+              pages_api_access_status="accepted"
             else
-              write_scope_status="rejected"
+              pages_api_access_status="rejected"
             fi
           else
-            write_scope_status="missing"
+            pages_api_access_status="missing"
           fi
-          echo "- Write token Pages API scope check: ${write_scope_status}" | tee -a "${GITHUB_STEP_SUMMARY}"
+          echo "- Write credential Pages API access check (read-only probe): ${pages_api_access_status}" | tee -a "${GITHUB_STEP_SUMMARY}"
 
           echo "Reading Pages project list with the read-only token..."
           projects_json="$(api_request GET "/accounts/${CF_ACCOUNT_ID}/pages/projects")"
@@ -241,8 +249,8 @@ jobs:
               exit 1
             fi
             echo "Submitting an explicit retry for failed deployment ${failed_short_id}..."
-            if [[ "${write_scope_status}" != "accepted" ]]; then
-              echo "::error::The write token did not pass the Pages API account-scope check. No retry request was submitted."
+            if [[ "${pages_api_access_status}" != "accepted" ]]; then
+              echo "::error::The credential did not pass the Pages API access check. No retry request was submitted."
               exit 1
             fi
             retry_json="$(api_request POST "/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}/deployments/${failed_id}/retry" '{}' "${CF_WRITE_TOKEN}")"
