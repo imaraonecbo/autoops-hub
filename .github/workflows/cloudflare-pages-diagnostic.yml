@@ -156,6 +156,21 @@ jobs:
               repository_count="$(jq --arg p '(repository not found|could not read from remote|authentication failed|access denied|permission to .* denied|fatal:|unable to access|failed to clone|clone failed|could not resolve host|connection timed out|http 403|http 404)' '[.result.data[]? | select((.line // "") | test($p; "i"))] | length' <<< "${logs_json}")"
               echo "- Repository/clone error matches: ${repository_count}" | tee -a "${GITHUB_STEP_SUMMARY}"
 
+              if jq -e '[.result.data[]?.line // ""] | join("\\n") | test("installation.*suspended|suspended.*installation"; "i")' <<< "${logs_json}" >/dev/null; then
+                clone_diagnosis="Cloudflare GitHub App installation appears suspended"
+              elif jq -e '[.result.data[]?.line // ""] | join("\\n") | test("disconnected from your git account|not properly installed|internal issue.*git installation"; "i")' <<< "${logs_json}" >/dev/null; then
+                clone_diagnosis="Cloudflare GitHub App connection appears disconnected or improperly installed"
+              elif jq -e '[.result.data[]?.line // ""] | join("\\n") | test("repository cannot be accessed|repository not found|could not read from remote repository|authentication failed|permission denied|access denied|http 403"; "i")' <<< "${logs_json}" >/dev/null; then
+                clone_diagnosis="GitHub repository access or authorization appears to be denied"
+              elif jq -e '[.result.data[]?.line // ""] | join("\\n") | test("repository.*does not exist|not found"; "i")' <<< "${logs_json}" >/dev/null; then
+                clone_diagnosis="Repository could not be found by the Cloudflare Git connection"
+              elif jq -e '[.result.data[]?.line // ""] | join("\\n") | test("internal issue.*scm|internal error"; "i")' <<< "${logs_json}" >/dev/null; then
+                clone_diagnosis="Cloudflare reports an internal source-control integration issue"
+              else
+                clone_diagnosis="Clone failed, but the returned log text does not match a known authorization pattern"
+              fi
+              echo "- Clone failure classification: ${clone_diagnosis}" | tee -a "${GITHUB_STEP_SUMMARY}"
+
               dependency_count="$(jq --arg p '(npm ERR|Could not resolve dependency|No matching version found|npm install failed|pip install failed|ModuleNotFoundError)' '[.result.data[]? | select((.line // "") | test($p; "i"))] | length' <<< "${logs_json}")"
               build_count="$(jq --arg p '(command not found|missing script|cannot find module|module not found|no such file|output directory|build failed)' '[.result.data[]? | select((.line // "") | test($p; "i"))] | length' <<< "${logs_json}")"
               resource_count="$(jq --arg p '(out of memory|heap out of memory|killed|timed out|timeout|oom)' '[.result.data[]? | select((.line // "") | test($p; "i"))] | length' <<< "${logs_json}")"
