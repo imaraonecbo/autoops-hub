@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - production-paypal-live-20261028
-    paths:
-      - .github/workflows/cloudflare-pages-ops.yml
   workflow_dispatch:
     inputs:
       operation:
