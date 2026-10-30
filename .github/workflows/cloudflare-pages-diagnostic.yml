@@ -64,7 +64,7 @@ jobs:
           echo "- API token: present (value withheld)" >> "${GITHUB_STEP_SUMMARY}"
 
           echo "Checking read-only access to the Cloudflare Pages projects endpoint..."
-          projects_json="$(api_get "/accounts/${CF_ACCOUNT_ID}/pages/projects?page=1&per_page=100")"
+          projects_json="$(api_get "/accounts/${CF_ACCOUNT_ID}/pages/projects")"
 
           mapfile -t project_names < <(jq -r '.result[]?.name // empty' <<< "${projects_json}")
           echo "" >> "${GITHUB_STEP_SUMMARY}"
