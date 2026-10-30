@@ -170,23 +170,36 @@ jobs:
           echo "### Recent production deployments" >> "${GITHUB_STEP_SUMMARY}"
           jq -r '.result[]? | "- " + (.short_id // .id // "unknown") + " | " + (.latest_stage.name // "unknown") + ": " + (.latest_stage.status // "unknown") + " | " + (.modified_on // "unknown") + " | " + (.url // "no URL")' <<< "${deployments_json}" | tee -a "${GITHUB_STEP_SUMMARY}"
 
-          failed_json="$(jq -c '[.result[]? | select(.latest_stage.status == "failure")][0] // empty' <<< "${deployments_json}")"
+          newest_json="$(jq -c '.result[0] // empty' <<< "${deployments_json}")"
+          newest_id="$(jq -r '.id // empty' <<< "${newest_json}")"
+          newest_status="$(jq -r '.latest_stage.status // "unknown"' <<< "${newest_json}")"
+
+          if [[ "${OPERATION}" == "retry_latest_failed" ]]; then
+            if [[ "${newest_status}" != "failure" ]]; then
+              newest_short_id="$(jq -r '.short_id // .id // "unknown"' <<< "${newest_json}")"
+              echo "The newest deployment (${newest_short_id}) is ${newest_status}; no historical deployment will be retried." | tee -a "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+            failed_json="${newest_json}"
+          else
+            failed_json="$(jq -c '[.result[]? | select(.latest_stage.status == "failure")][0] // empty' <<< "${deployments_json}")"
+          fi
           failed_id="$(jq -r '.id // empty' <<< "${failed_json}")"
 
           if [[ -z "${failed_id}" ]]; then
             echo "" >> "${GITHUB_STEP_SUMMARY}"
             echo "No failed production deployment was found in the latest ten results." | tee -a "${GITHUB_STEP_SUMMARY}"
-            if [[ "${OPERATION}" == "retry_latest_failed" ]]; then
-              echo "::error::There is no failed deployment to retry."
-              exit 1
-            fi
             exit 0
           fi
 
           failed_short_id="$(jq -r '.short_id // .id' <<< "${failed_json}")"
           failed_stage="$(jq -r '.latest_stage.name // "unknown"' <<< "${failed_json}")"
           echo "" >> "${GITHUB_STEP_SUMMARY}"
-          echo "### Latest failed deployment" >> "${GITHUB_STEP_SUMMARY}"
+          if [[ "${OPERATION}" == "retry_latest_failed" ]]; then
+            echo "### Newest failed deployment selected for retry" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "### Most recent historical failed deployment (diagnostic only)" >> "${GITHUB_STEP_SUMMARY}"
+          fi
           echo "- Deployment: ${failed_short_id}" | tee -a "${GITHUB_STEP_SUMMARY}"
           echo "- Failed stage: ${failed_stage}" | tee -a "${GITHUB_STEP_SUMMARY}"
 
