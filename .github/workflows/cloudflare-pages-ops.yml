@@ -249,3 +249,28 @@ jobs:
           echo ""
           echo "## Safe diagnostic summary"
           cat "${GITHUB_STEP_SUMMARY}"
+
+      - name: Verify Cloudflare Pages production site
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://autoops-hub.pages.dev/"
+          response="$(curl --location --silent --show-error --connect-timeout 15 --max-time 45 --write-out \\n%{http_code}' "${url}")"
+          http_status="${response##*\\n'}"
+          html="${response%\\n'*}"
+
+          echo "## Public Pages HTTP verification" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- URL: ${url}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- HTTP status: ${http_status}" | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${http_status}" != "200" ]]; then
+            echo "::error::Cloudflare Pages production site did not return HTTP 200."
+            exit 1
+          fi
+          if ! grep -Fqi '<title>Free CSV Cleanup & File Processing for Small Teams | AutoOps Hub</title>' <<< "${html}"; then
+            echo "::error::Cloudflare Pages returned HTTP 200 but the expected AutoOps Hub page title was not present."
+            exit 1
+          fi
+
+          echo "- Expected AutoOps Hub page title: found" | tee -a "${GITHUB_STEP_SUMMARY}"
+          echo "Cloudflare Pages public-site verification passed."
