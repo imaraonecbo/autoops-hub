@@ -134,5 +134,33 @@ jobs:
               tee -a "${GITHUB_STEP_SUMMARY}"
           fi
 
+          latest_deployment_id="$(jq -r '.result[0].id // empty' <<< "${deployments_json}")"
+          if [[ -n "${latest_deployment_id}" ]]; then
+            latest_stage_name="$(jq -r '.result[0].latest_stage.name // "unknown"' <<< "${deployments_json}")"
+            latest_stage_status="$(jq -r '.result[0].latest_stage.status // "unknown"' <<< "${deployments_json}")"
+            echo "" >> "${GITHUB_STEP_SUMMARY}"
+            echo "### Latest deployment failure analysis" >> "${GITHUB_STEP_SUMMARY}"
+            echo "- Last stage: ${latest_stage_name} (${latest_stage_status})" | tee -a "${GITHUB_STEP_SUMMARY}"
+
+            if logs_json="$(api_get "/accounts/${CF_ACCOUNT_ID}/pages/projects/${project_name}/deployments/${latest_deployment_id}/history/logs")"; then
+              total_log_lines="$(jq -r '.result.total // (.result.data | length) // 0' <<< "${logs_json}")"
+              echo "- Cloudflare returned ${total_log_lines} log entries." | tee -a "${GITHUB_STEP_SUMMARY}"
+
+              dependency_count="$(jq --arg p '(npm ERR|Could not resolve dependency|No matching version found|npm install failed|pip install failed|ModuleNotFoundError)' '[.result.data[]? | select((.line // "") | test($p; "i"))] | length' <<< "${logs_json}")"
+              build_count="$(jq --arg p '(command not found|missing script|cannot find module|module not found|no such file|output directory|build failed)' '[.result.data[]? | select((.line // "") | test($p; "i"))] | length' <<< "${logs_json}")"
+              resource_count="$(jq --arg p '(out of memory|heap out of memory|killed|timed out|timeout|oom)' '[.result.data[]? | select((.line // "") | test($p; "i"))] | length' <<< "${logs_json}")"
+              deploy_count="$(jq --arg p '(permission denied|unauthorized|forbidden|failed to upload|upload failed|rate limit|connection refused|could not resolve host)' '[.result.data[]? | select((.line // "") | test($p; "i"))] | length' <<< "${logs_json}")"
+
+              echo "- Dependency/package error matches: ${dependency_count}" | tee -a "${GITHUB_STEP_SUMMARY}"
+              echo "- Build/configuration error matches: ${build_count}" | tee -a "${GITHUB_STEP_SUMMARY}"
+              echo "- Timeout/resource error matches: ${resource_count}" | tee -a "${GITHUB_STEP_SUMMARY}"
+              echo "- Upload/network/permission error matches: ${deploy_count}" | tee -a "${GITHUB_STEP_SUMMARY}"
+              echo "- Raw build log lines are deliberately withheld from public Actions output." >> "${GITHUB_STEP_SUMMARY}"
+            else
+              echo "::warning::The Pages project and deployment list are readable, but Cloudflare did not allow this token to read deployment history logs."
+              echo "- Deployment log access: unavailable to this token; no broader permissions were requested." >> "${GITHUB_STEP_SUMMARY}"
+            fi
+          fi
+
           echo ""
           echo "Read-only diagnostic completed. No Cloudflare settings or deployments were changed."
