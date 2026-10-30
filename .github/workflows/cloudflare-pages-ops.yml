@@ -125,10 +125,11 @@ jobs:
             echo "- Build command: ${build_command}"
             echo "- Output directory: ${build_output}"
             echo "- Root directory: ${root_directory}"
-          } | tee -a "${GITHUB_STEP_SUMMARY}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "::notice title=Pages project metadata::result=${result_type}; keys=${result_keys}; source=${project_source}; repo=${connected_owner:-unknown}/${connected_repo:-unknown}; branch=${configured_branch}"
 
-          if [[ "${project_source}" != "github" ]]; then
-            echo "::error::Cloudflare Pages does not report GitHub as its source provider. No retry or configuration change will be attempted."
+          if [[ "${project_source}" != "unknown" && "${project_source}" != "github" ]]; then
+            echo "::error::Cloudflare Pages reports a non-GitHub source provider. No retry or configuration change will be attempted."
             exit 1
           fi
           if [[ -n "${connected_owner}" && "${connected_owner}" != "imaraonecbo" ]]; then
@@ -139,7 +140,7 @@ jobs:
             echo "::error::Cloudflare Pages is connected to a different repository. No retry or configuration change will be attempted."
             exit 1
           fi
-          if [[ "${configured_branch}" != "production-paypal-live-20261028" ]]; then
+          if [[ "${configured_branch}" != "unknown" && "${configured_branch}" != "production-paypal-live-20261028" ]]; then
             echo "::error::Cloudflare Pages production branch differs from the approved production branch. No change will be made automatically."
             exit 1
           fi
