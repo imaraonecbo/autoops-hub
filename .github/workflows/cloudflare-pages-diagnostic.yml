@@ -1,6 +1,11 @@
 name: Cloudflare Pages Diagnostic
 
 on:
+  push:
+    branches:
+      - production-paypal-live-20261028
+    paths:
+      - .github/workflows/cloudflare-pages-diagnostic.yml
   workflow_dispatch:
 
 permissions:
