@@ -84,7 +84,7 @@ jobs:
             fi
             if ! jq -e '.success == true' <<< "${body}" >/dev/null; then
               echo "::error::Cloudflare API did not report success for ${method} ${endpoint}." >&2
-              jq -r '.errors[]?.message // empty' <<< "${body}" || true
+              jq -r '.errors[]?.message // empty' <<< "${body}" >&2 || true
               return 1
             fi
             printf '%s' "${body}"
@@ -123,16 +123,16 @@ jobs:
             echo "::error::The Pages API did not return the expected project from the account project list. Check account scope and the project name."
             exit 1
           fi
-          result_type="$(jq -r '.result | type' <<< "${project_json}")"
-          result_keys="$(jq -r 'if (.result | type) == "object" then (.result | keys | join(",")) else "result is not an object" end' <<< "${project_json}")"
-          project_source="$(jq -r 'try (.result.source.type // "unknown") catch "unknown"' <<< "${project_json}")"
-          connected_owner="$(jq -r 'try (.result.source.config.owner // "") catch ""' <<< "${project_json}")"
-          connected_repo="$(jq -r 'try (.result.source.config.repo_name // "") catch ""' <<< "${project_json}")"
-          configured_branch="$(jq -r 'try (.result.production_branch // "unknown") catch "unknown"' <<< "${project_json}")"
-          build_command="$(jq -r 'try (.result.build_config.build_command // "(not set)") catch "(not reported)"' <<< "${project_json}")"
-          build_output="$(jq -r 'try (.result.build_config.destination_dir // "(not set)") catch "(not reported)"' <<< "${project_json}")"
-          root_directory="$(jq -r 'try (.result.build_config.root_dir // "(not set)") catch "(not reported)"' <<< "${project_json}")"
-          production_enabled="$(jq -r 'try (.result.production_deployments_enabled // "unknown") catch "unknown"' <<< "${project_json}")"
+          result_type="$(jq -r 'type' <<< "${project_json}")"
+          result_keys="$(jq -r 'if type == "object" then (keys | join(",")) else "result is not an object" end' <<< "${project_json}")"
+          project_source="$(jq -r 'try (.source.type // "unknown") catch "unknown"' <<< "${project_json}")"
+          connected_owner="$(jq -r 'try (.source.config.owner // "") catch ""' <<< "${project_json}")"
+          connected_repo="$(jq -r 'try (.source.config.repo_name // "") catch ""' <<< "${project_json}")"
+          configured_branch="$(jq -r 'try (.production_branch // "unknown") catch "unknown"' <<< "${project_json}")"
+          build_command="$(jq -r 'try (.build_config.build_command // "(not set)") catch "(not reported)"' <<< "${project_json}")"
+          build_output="$(jq -r 'try (.build_config.destination_dir // "(not set)") catch "(not reported)"' <<< "${project_json}")"
+          root_directory="$(jq -r 'try (.build_config.root_dir // "(not set)") catch "(not reported)"' <<< "${project_json}")"
+          production_enabled="$(jq -r 'try (.production_deployments_enabled // "unknown") catch "unknown"' <<< "${project_json}")"
 
           {
             echo ""
