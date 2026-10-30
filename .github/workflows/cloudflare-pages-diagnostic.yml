@@ -36,10 +36,10 @@ jobs:
             response="$(curl --silent --show-error --connect-timeout 15 --max-time 45 \
               --header "Authorization: Bearer ${CF_API_TOKEN}" \
               --header "Accept: application/json" \
-              --write-out $'\\n%{http_code}' \
+              --write-out $'\n%{http_code}' \
               "https://api.cloudflare.com/client/v4${endpoint}")"
-            http_code="${response##*$'\\n'}"
-            body="${response%$'\\n'*}"
+            http_code="${response##*$'\n'}"
+            body="${response%$'\n'*}"
 
             if [[ ! "${http_code}" =~ ^2[0-9][0-9]$ ]]; then
               echo "::error::Cloudflare API returned HTTP ${http_code} for ${endpoint}."
@@ -65,11 +65,11 @@ jobs:
           mapfile -t project_names < <(jq -r '.result[]?.name // empty' <<< "${projects_json}")
           echo "" >> "${GITHUB_STEP_SUMMARY}"
           echo "### Pages projects visible to this token" >> "${GITHUB_STEP_SUMMARY}"
-          if (("${#project_names[@]}" == 0)); then
+          if (( ${#project_names[@]} == 0 )); then
             echo "No Pages projects were returned for this account." | tee -a "${GITHUB_STEP_SUMMARY}"
             exit 0
           fi
-          printf '%s\\n' "${project_names[@]}" | sed 's/^/- /' | tee -a "${GITHUB_STEP_SUMMARY}"
+          printf '%s\n' "${project_names[@]}" | sed 's/^/- /' | tee -a "${GITHUB_STEP_SUMMARY}"
 
           mapfile -t matches < <(jq -r '
             .result[]?
@@ -78,11 +78,11 @@ jobs:
             | .name
           ' <<< "${projects_json}")
 
-          if (("${#matches[@]}" == 0)); then
+          if (( ${#matches[@]} == 0 )); then
             echo "::warning::The API token works, but no project name containing 'autoops' or 'auto-ops' was found. Review the project list above."
             exit 0
           fi
-          if (("${#matches[@]}" > 1)); then
+          if (( ${#matches[@]} > 1 )); then
             echo "::error::Multiple possible AutoOps Pages projects were found: ${matches[*]}. Project selection needs to be disambiguated."
             exit 1
           fi
@@ -123,7 +123,7 @@ jobs:
             echo "No production deployments were returned." | tee -a "${GITHUB_STEP_SUMMARY}"
           else
             jq -r '.result[] |
-              "- \" + (.short_id // .id // "unknown") +
+              "- " + (.short_id // .id // "unknown") +
               " | status: " + (.latest_stage.status // "unknown") +
               " | updated: " + (.modified_on // "unknown") +
               " | URL: " + (.url // "not reported")' <<< "${deployments_json}" |
