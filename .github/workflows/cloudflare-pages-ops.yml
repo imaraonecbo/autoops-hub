@@ -1,0 +1,212 @@
+name: Cloudflare Pages Operations
+
+on:
+  push:
+    branches:
+      - production-paypal-live-20261028
+    paths:
+      - .github/workflows/cloudflare-pages-ops.yml
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Inspect the project or retry the newest failed deployment
+        type: choice
+        required: true
+        default: inspect
+        options:
+          - inspect
+          - retry_latest_failed
+      confirm_retry:
+        description: Must be true to submit a retry request
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-pages-ops
+  cancel-in-progress: false
+
+jobs:
+  pages-ops:
+    name: Protected Cloudflare Pages operation
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment:
+      name: cloudflare-write
+    env:
+      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_WRITE_TOKEN }}
+      CF_ACCOUNT_ID: "cb35584737ab3f7fa4ceafc3d19214ab"
+      CF_PROJECT_NAME: "autoops-hub"
+      OPERATION: ${{ inputs.operation || 'inspect' }}
+      CONFIRM_RETRY: ${{ inputs.confirm_retry || false }}
+    steps:
+      - name: Verify write credential, inspect connection and diagnose latest failed build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${CF_API_TOKEN}" ]]; then
+            echo "::error::Environment secret CLOUDFLARE_PAGES_WRITE_TOKEN is unavailable. Check the cloudflare-write environment secret name and approval rules."
+            exit 1
+          fi
+
+          api_request() {
+            local method="$1"
+            local endpoint="$2"
+            local payload="${3:-}"
+            local response http_code body
+            local -a args
+            args=(--silent --show-error --connect-timeout 15 --max-time 60
+              --request "${method}"
+              --header "Authorization: Bearer ${CF_API_TOKEN}"
+              --header "Accept: application/json")
+            if [[ -n "${payload}" ]]; then
+              args+=(--header "Content-Type: application/json" --data "${payload}")
+            fi
+            if ! response="$(curl "${args[@]}" --write-out '|%{http_code}' "https://api.cloudflare.com/client/v4${endpoint}")"; then
+              echo "::error::Cloudflare request failed for ${method} ${endpoint}."
+              return 1
+            fi
+            http_code="${response##*|}"
+            body="${response%|*}"
+            if [[ ! "${http_code}" =~ ^2[0-9][0-9]$ ]]; then
+              echo "::error::Cloudflare API returned HTTP ${http_code} for ${method} ${endpoint}."
+              jq -r '.errors[]?.message // empty' <<< "${body}" || true
+              return 1
+            fi
+            if ! jq -e '.success == true' <<< "${body}" >/dev/null; then
+              echo "::error::Cloudflare API did not report success for ${method} ${endpoint}."
+              jq -r '.errors[]?.message // empty' <<< "${body}" || true
+              return 1
+            fi
+            printf '%s' "${body}"
+          }
+
+          echo "## Cloudflare Pages protected operations" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Project: ${CF_PROJECT_NAME}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Requested operation: ${OPERATION}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Write token: present (value withheld)" >> "${GITHUB_STEP_SUMMARY}"
+
+          echo "Verifying Cloudflare token..."
+          token_json="$(api_request GET "/user/tokens/verify")"
+          token_status="$(jq -r '.result.status // "unknown"' <<< "${token_json}")"
+          echo "- Token status: ${token_status}" | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${token_status}" != "active" ]]; then
+            echo "::error::Cloudflare token is not active."
+            exit 1
+          fi
+
+          echo "Reading Pages project configuration..."
+          project_json="$(api_request GET "/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}")"
+          project_source="$(jq -r '.result.source.type // "unknown"' <<< "${project_json}")"
+          connected_owner="$(jq -r '.result.source.config.owner // empty' <<< "${project_json}")"
+          connected_repo="$(jq -r '.result.source.config.repo_name // empty' <<< "${project_json}")"
+          configured_branch="$(jq -r '.result.production_branch // "unknown"' <<< "${project_json}")"
+          build_command="$(jq -r '.result.build_config.build_command // "(not set)"' <<< "${project_json}")"
+          build_output="$(jq -r '.result.build_config.destination_dir // "(not set)"' <<< "${project_json}")"
+          root_directory="$(jq -r '.result.build_config.root_dir // "(not set)"' <<< "${project_json}")"
+          production_enabled="$(jq -r '.result.production_deployments_enabled // "unknown"' <<< "${project_json}")"
+
+          {
+            echo ""
+            echo "### Pages project configuration"
+            echo "- Source provider: ${project_source}"
+            echo "- Connected repository: ${connected_owner}/${connected_repo}"
+            echo "- Production branch: ${configured_branch}"
+            echo "- Production auto-deploys enabled: ${production_enabled}"
+            echo "- Build command: ${build_command}"
+            echo "- Output directory: ${build_output}"
+            echo "- Root directory: ${root_directory}"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${project_source}" != "github" || "${connected_owner}" != "imaraonecbo" || "${connected_repo}" != "autoops-hub" ]]; then
+            echo "::error::Cloudflare Pages source does not match the intended GitHub repository. No retry or configuration change will be attempted."
+            exit 1
+          fi
+
+          if [[ "${configured_branch}" != "production-paypal-live-20261028" ]]; then
+            echo "::error::Cloudflare Pages production branch differs from the approved production branch. No change will be made automatically."
+            exit 1
+          fi
+
+          echo "Reading the ten most recent production deployments..."
+          deployments_json="$(api_request GET "/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}/deployments?env=production&page=1&per_page=10")"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "### Recent production deployments" >> "${GITHUB_STEP_SUMMARY}"
+          jq -r '.result[]? | "- " + (.short_id // .id // "unknown") + " | " + (.latest_stage.name // "unknown") + ": " + (.latest_stage.status // "unknown") + " | " + (.modified_on // "unknown") + " | " + (.url // "no URL")' <<< "${deployments_json}" | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          failed_json="$(jq -c '[.result[]? | select(.latest_stage.status == "failure")][0] // empty' <<< "${deployments_json}")"
+          failed_id="$(jq -r '.id // empty' <<< "${failed_json}")"
+
+          if [[ -z "${failed_id}" ]]; then
+            echo "" >> "${GITHUB_STEP_SUMMARY}"
+            echo "No failed production deployment was found in the latest ten results." | tee -a "${GITHUB_STEP_SUMMARY}"
+            if [[ "${OPERATION}" == "retry_latest_failed" ]]; then
+              echo "::error::There is no failed deployment to retry."
+              exit 1
+            fi
+            exit 0
+          fi
+
+          failed_short_id="$(jq -r '.short_id // .id' <<< "${failed_json}")"
+          failed_stage="$(jq -r '.latest_stage.name // "unknown"' <<< "${failed_json}")"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "### Latest failed deployment" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Deployment: ${failed_short_id}" | tee -a "${GITHUB_STEP_SUMMARY}"
+          echo "- Failed stage: ${failed_stage}" | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          echo "Retrieving detailed deployment history logs..."
+          logs_json="$(api_request GET "/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}/deployments/${failed_id}/history/logs")"
+          total_logs="$(jq -r '.result.total // (.result.data | length) // 0' <<< "${logs_json}")"
+          echo "- Log entries available: ${total_logs}" | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          log_text="$(jq -r '[.result.data[]?.line // empty] | join("\\n")' <<< "${logs_json}")"
+          classify() {
+            local regex="$1"
+            if grep -Eqi "${regex}" <<< "${log_text}"; then printf 'detected'; else printf 'not detected'; fi
+          }
+          {
+            echo "- GitHub App disconnected: $(classify 'disconnected from your git account|not properly installed')"
+            echo "- GitHub App suspended: $(classify 'installation.*suspended|suspended.*installation')"
+            echo "- Repository access denied: $(classify 'repository cannot be accessed|repository not found|authentication failed|permission denied|access denied|http 403|could not read from remote')"
+            echo "- Git LFS issue: $(classify 'git lfs|large file storage|lfs smudge|filter-process')"
+            echo "- Submodule issue: $(classify 'submodule|\.gitmodules')"
+            echo "- Network or DNS issue: $(classify 'could not resolve host|connection timed out|connection refused|network is unreachable')"
+            echo "- Cloudflare SCM internal issue: $(classify 'internal issue.*git installation|internal error.*scm')"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "### Sanitized matching log excerpts" >> "${GITHUB_STEP_SUMMARY}"
+          matching_lines="$(jq -r '[.result.data[]?.line // empty | select(test("error|fatal|failed|denied|repository|clone|git|lfs|submodule|suspend|install|remote"; "i"))] | unique | .[-10:][]' <<< "${logs_json}" | sed -E 's#https?://[^/@ ]+:[^/@ ]+@#https://[REDACTED]@#g; s/(Bearer|token|password|secret)[=: ]+[^ ]+/\1=[REDACTED]/Ig; s/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g')"
+          if [[ -n "${matching_lines}" ]]; then
+            while IFS= read -r line; do
+              echo "- ${line}" >> "${GITHUB_STEP_SUMMARY}"
+            done <<< "${matching_lines}"
+          else
+            echo "No matching error lines were returned by Cloudflare." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          echo "- Full raw logs are not copied to the public Actions summary." >> "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${OPERATION}" == "retry_latest_failed" ]]; then
+            if [[ "${CONFIRM_RETRY}" != "true" ]]; then
+              echo "::error::Retry was requested without confirm_retry=true. No deployment action was taken."
+              exit 1
+            fi
+            echo "Submitting an explicit retry for failed deployment ${failed_short_id}..."
+            retry_json="$(api_request POST "/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}/deployments/${failed_id}/retry" '{}')"
+            retry_id="$(jq -r '.result.id // empty' <<< "${retry_json}")"
+            retry_url="$(jq -r '.result.url // empty' <<< "${retry_json}")"
+            {
+              echo ""
+              echo "### Retry request accepted"
+              echo "- New deployment ID: ${retry_id:-not returned}"
+              echo "- Deployment URL: ${retry_url:-not returned}"
+            } | tee -a "${GITHUB_STEP_SUMMARY}"
+          else
+            echo ""
+            echo "Inspection completed. No Pages settings or deployments were changed."
+          fi
