@@ -102,20 +102,24 @@ jobs:
 
           echo "Reading Pages project configuration..."
           project_json="$(api_request GET "/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}")"
-          project_source="$(jq -r '.result.source.type // "unknown"' <<< "${project_json}")"
-          connected_owner="$(jq -r '.result.source.config.owner // empty' <<< "${project_json}")"
-          connected_repo="$(jq -r '.result.source.config.repo_name // empty' <<< "${project_json}")"
-          configured_branch="$(jq -r '.result.production_branch // "unknown"' <<< "${project_json}")"
-          build_command="$(jq -r '.result.build_config.build_command // "(not set)"' <<< "${project_json}")"
-          build_output="$(jq -r '.result.build_config.destination_dir // "(not set)"' <<< "${project_json}")"
-          root_directory="$(jq -r '.result.build_config.root_dir // "(not set)"' <<< "${project_json}")"
-          production_enabled="$(jq -r '.result.production_deployments_enabled // "unknown"' <<< "${project_json}")"
+          result_type="$(jq -r '.result | type' <<< "${project_json}")"
+          result_keys="$(jq -r 'if (.result | type) == "object" then (.result | keys | join(",")) else "result is not an object" end' <<< "${project_json}")"
+          project_source="$(jq -r 'try (.result.source.type // "unknown") catch "unknown"' <<< "${project_json}")"
+          connected_owner="$(jq -r 'try (.result.source.config.owner // "") catch ""' <<< "${project_json}")"
+          connected_repo="$(jq -r 'try (.result.source.config.repo_name // "") catch ""' <<< "${project_json}")"
+          configured_branch="$(jq -r 'try (.result.production_branch // "unknown") catch "unknown"' <<< "${project_json}")"
+          build_command="$(jq -r 'try (.result.build_config.build_command // "(not set)") catch "(not reported)"' <<< "${project_json}")"
+          build_output="$(jq -r 'try (.result.build_config.destination_dir // "(not set)") catch "(not reported)"' <<< "${project_json}")"
+          root_directory="$(jq -r 'try (.result.build_config.root_dir // "(not set)") catch "(not reported)"' <<< "${project_json}")"
+          production_enabled="$(jq -r 'try (.result.production_deployments_enabled // "unknown") catch "unknown"' <<< "${project_json}")"
 
           {
             echo ""
             echo "### Pages project configuration"
+            echo "- Project result type: ${result_type}"
+            echo "- Available project fields: ${result_keys}"
             echo "- Source provider: ${project_source}"
-            echo "- Connected repository: ${connected_owner}/${connected_repo}"
+            echo "- Connected repository: ${connected_owner:-not returned}/${connected_repo:-not returned}"
             echo "- Production branch: ${configured_branch}"
             echo "- Production auto-deploys enabled: ${production_enabled}"
             echo "- Build command: ${build_command}"
@@ -123,11 +127,18 @@ jobs:
             echo "- Root directory: ${root_directory}"
           } | tee -a "${GITHUB_STEP_SUMMARY}"
 
-          if [[ "${project_source}" != "github" || "${connected_owner}" != "imaraonecbo" || "${connected_repo}" != "autoops-hub" ]]; then
-            echo "::error::Cloudflare Pages source does not match the intended GitHub repository. No retry or configuration change will be attempted."
+          if [[ "${project_source}" != "github" ]]; then
+            echo "::error::Cloudflare Pages does not report GitHub as its source provider. No retry or configuration change will be attempted."
             exit 1
           fi
-
+          if [[ -n "${connected_owner}" && "${connected_owner}" != "imaraonecbo" ]]; then
+            echo "::error::Cloudflare Pages is connected to a different GitHub owner. No retry or configuration change will be attempted."
+            exit 1
+          fi
+          if [[ -n "${connected_repo}" && "${connected_repo}" != "autoops-hub" ]]; then
+            echo "::error::Cloudflare Pages is connected to a different repository. No retry or configuration change will be attempted."
+            exit 1
+          fi
           if [[ "${configured_branch}" != "production-paypal-live-20261028" ]]; then
             echo "::error::Cloudflare Pages production branch differs from the approved production branch. No change will be made automatically."
             exit 1
