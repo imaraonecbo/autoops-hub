@@ -100,8 +100,13 @@ jobs:
             exit 1
           fi
 
-          echo "Reading Pages project configuration..."
-          project_json="$(api_request GET "/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}")"
+          echo "Reading Pages project list..."
+          projects_json="$(api_request GET "/accounts/${CF_ACCOUNT_ID}/pages/projects")"
+          project_json="$(jq -c --arg name "${CF_PROJECT_NAME}" '.result[]? | select(.name == $name)' <<< "${projects_json}")"
+          if [[ -z "${project_json}" ]]; then
+            echo "::error::The Pages API did not return the expected project from the account project list. Check account scope and the project name."
+            exit 1
+          fi
           result_type="$(jq -r '.result | type' <<< "${project_json}")"
           result_keys="$(jq -r 'if (.result | type) == "object" then (.result | keys | join(",")) else "result is not an object" end' <<< "${project_json}")"
           project_source="$(jq -r 'try (.result.source.type // "unknown") catch "unknown"' <<< "${project_json}")"
