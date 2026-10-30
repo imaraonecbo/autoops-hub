@@ -38,23 +38,266 @@ jobs:
           api_get() {
             local endpoint="$1"
             local response http_code body
-            response="$(curl --silent --show-error --connect-timeout 15 --max-time 45 \
+            if ! response="$(curl --silent --show-error --connect-timeout 15 --max-time 45 \
               --header "Authorization: Bearer ${CF_API_TOKEN}" \
               --header "Accept: application/json" \
-              --write-out $'\n%{http_code}' \
-              "https://api.cloudflare.com/client/v4${endpoint}")"
-            http_code="${response##*$'\n'}"
-            body="${response%$'\n'*}"
+              --write-out 
+
+          echo "## Cloudflare Pages diagnostic" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Account ID: ${CF_ACCOUNT_ID}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Expected production branch: ${EXPECTED_PRODUCTION_BRANCH}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- API token: present (value withheld)" >> "${GITHUB_STEP_SUMMARY}"
+
+          echo "Checking read-only access to the Cloudflare Pages projects endpoint..."
+          projects_json="$(api_get "/accounts/${CF_ACCOUNT_ID}/pages/projects?page=1&per_page=100")"
+
+          mapfile -t project_names < <(jq -r '.result[]?.name // empty' <<< "${projects_json}")
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "### Pages projects visible to this token" >> "${GITHUB_STEP_SUMMARY}"
+          if (( ${#project_names[@]} == 0 )); then
+            echo "No Pages projects were returned for this account." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          printf '%s\n' "${project_names[@]}" | sed 's/^/- /' | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          mapfile -t matches < <(jq -r '
+            .result[]?
+            | select((.name | ascii_downcase | contains("autoops"))
+                  or (.name | ascii_downcase | contains("auto-ops")))
+            | .name
+          ' <<< "${projects_json}")
+
+          if (( ${#matches[@]} == 0 )); then
+            echo "::warning::The API token works, but no project name containing 'autoops' or 'auto-ops' was found. Review the project list above."
+            exit 0
+          fi
+          if (( ${#matches[@]} > 1 )); then
+            echo "::error::Multiple possible AutoOps Pages projects were found: ${matches[*]}. Project selection needs to be disambiguated."
+            exit 1
+          fi
+
+          project_name="${matches[0]}"
+          project_json="$(jq -c --arg name "${project_name}" '.result[] | select(.name == $name)' <<< "${projects_json}")"
+          production_branch="$(jq -r '.production_branch // .source.config.production_branch // "unknown"' <<< "${project_json}")"
+          repository_owner="$(jq -r '.source.config.owner // empty' <<< "${project_json}")"
+          repository_name="$(jq -r '.source.config.repo_name // empty' <<< "${project_json}")"
+          domains="$(jq -r '.domains[]? // empty' <<< "${project_json}" | paste -sd ', ' -)"
+          canonical_status="$(jq -r '.canonical_deployment.latest_stage.status // "unknown"' <<< "${project_json}")"
+          canonical_url="$(jq -r '.canonical_deployment.url // empty' <<< "${project_json}")"
+
+          {
+            echo ""
+            echo "### AutoOps Hub Pages project: ${project_name}"
+            echo "- Connected repository: ${repository_owner}/${repository_name}"
+            echo "- Configured production branch: ${production_branch}"
+            echo "- Expected branch: ${EXPECTED_PRODUCTION_BRANCH}"
+            echo "- Canonical deployment status: ${canonical_status}"
+            echo "- Canonical deployment URL: ${canonical_url:-not reported}"
+            echo "- Domains: ${domains:-none reported}"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${production_branch}" == "${EXPECTED_PRODUCTION_BRANCH}" ]]; then
+            echo "::notice::Cloudflare Pages production branch matches the expected AutoOps Hub branch."
+          else
+            echo "::warning::Cloudflare Pages production branch does not match the expected branch."
+          fi
+
+          echo "Fetching the latest ten production deployments..."
+          deployments_json="$(api_get "/accounts/${CF_ACCOUNT_ID}/pages/projects/${project_name}/deployments?env=production&page=1&per_page=10")"
+
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "### Recent production deployments" >> "${GITHUB_STEP_SUMMARY}"
+          deployment_count="$(jq '.result | length' <<< "${deployments_json}")"
+          if [[ "${deployment_count}" == "0" ]]; then
+            echo "No production deployments were returned." | tee -a "${GITHUB_STEP_SUMMARY}"
+          else
+            jq -r '.result[] |
+              "- " + (.short_id // .id // "unknown") +
+              " | status: " + (.latest_stage.status // "unknown") +
+              " | updated: " + (.modified_on // "unknown") +
+              " | URL: " + (.url // "not reported")' <<< "${deployments_json}" |
+              tee -a "${GITHUB_STEP_SUMMARY}"
+          fi
+
+          echo ""
+          echo "Read-only diagnostic completed. No Cloudflare settings or deployments were changed."
+\n%{http_code}' \
+              "https://api.cloudflare.com/client/v4${endpoint}")"; then
+              echo "::error::Could not complete the Cloudflare API request to ${endpoint}." >&2
+              return 1
+            fi
+            http_code="${response##*
+
+          echo "## Cloudflare Pages diagnostic" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Account ID: ${CF_ACCOUNT_ID}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Expected production branch: ${EXPECTED_PRODUCTION_BRANCH}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- API token: present (value withheld)" >> "${GITHUB_STEP_SUMMARY}"
+
+          echo "Checking read-only access to the Cloudflare Pages projects endpoint..."
+          projects_json="$(api_get "/accounts/${CF_ACCOUNT_ID}/pages/projects?page=1&per_page=100")"
+
+          mapfile -t project_names < <(jq -r '.result[]?.name // empty' <<< "${projects_json}")
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "### Pages projects visible to this token" >> "${GITHUB_STEP_SUMMARY}"
+          if (( ${#project_names[@]} == 0 )); then
+            echo "No Pages projects were returned for this account." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          printf '%s\n' "${project_names[@]}" | sed 's/^/- /' | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          mapfile -t matches < <(jq -r '
+            .result[]?
+            | select((.name | ascii_downcase | contains("autoops"))
+                  or (.name | ascii_downcase | contains("auto-ops")))
+            | .name
+          ' <<< "${projects_json}")
+
+          if (( ${#matches[@]} == 0 )); then
+            echo "::warning::The API token works, but no project name containing 'autoops' or 'auto-ops' was found. Review the project list above."
+            exit 0
+          fi
+          if (( ${#matches[@]} > 1 )); then
+            echo "::error::Multiple possible AutoOps Pages projects were found: ${matches[*]}. Project selection needs to be disambiguated."
+            exit 1
+          fi
+
+          project_name="${matches[0]}"
+          project_json="$(jq -c --arg name "${project_name}" '.result[] | select(.name == $name)' <<< "${projects_json}")"
+          production_branch="$(jq -r '.production_branch // .source.config.production_branch // "unknown"' <<< "${project_json}")"
+          repository_owner="$(jq -r '.source.config.owner // empty' <<< "${project_json}")"
+          repository_name="$(jq -r '.source.config.repo_name // empty' <<< "${project_json}")"
+          domains="$(jq -r '.domains[]? // empty' <<< "${project_json}" | paste -sd ', ' -)"
+          canonical_status="$(jq -r '.canonical_deployment.latest_stage.status // "unknown"' <<< "${project_json}")"
+          canonical_url="$(jq -r '.canonical_deployment.url // empty' <<< "${project_json}")"
+
+          {
+            echo ""
+            echo "### AutoOps Hub Pages project: ${project_name}"
+            echo "- Connected repository: ${repository_owner}/${repository_name}"
+            echo "- Configured production branch: ${production_branch}"
+            echo "- Expected branch: ${EXPECTED_PRODUCTION_BRANCH}"
+            echo "- Canonical deployment status: ${canonical_status}"
+            echo "- Canonical deployment URL: ${canonical_url:-not reported}"
+            echo "- Domains: ${domains:-none reported}"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${production_branch}" == "${EXPECTED_PRODUCTION_BRANCH}" ]]; then
+            echo "::notice::Cloudflare Pages production branch matches the expected AutoOps Hub branch."
+          else
+            echo "::warning::Cloudflare Pages production branch does not match the expected branch."
+          fi
+
+          echo "Fetching the latest ten production deployments..."
+          deployments_json="$(api_get "/accounts/${CF_ACCOUNT_ID}/pages/projects/${project_name}/deployments?env=production&page=1&per_page=10")"
+
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "### Recent production deployments" >> "${GITHUB_STEP_SUMMARY}"
+          deployment_count="$(jq '.result | length' <<< "${deployments_json}")"
+          if [[ "${deployment_count}" == "0" ]]; then
+            echo "No production deployments were returned." | tee -a "${GITHUB_STEP_SUMMARY}"
+          else
+            jq -r '.result[] |
+              "- " + (.short_id // .id // "unknown") +
+              " | status: " + (.latest_stage.status // "unknown") +
+              " | updated: " + (.modified_on // "unknown") +
+              " | URL: " + (.url // "not reported")' <<< "${deployments_json}" |
+              tee -a "${GITHUB_STEP_SUMMARY}"
+          fi
+
+          echo ""
+          echo "Read-only diagnostic completed. No Cloudflare settings or deployments were changed."
+\n'}"
+            body="${response%
+
+          echo "## Cloudflare Pages diagnostic" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Account ID: ${CF_ACCOUNT_ID}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Expected production branch: ${EXPECTED_PRODUCTION_BRANCH}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- API token: present (value withheld)" >> "${GITHUB_STEP_SUMMARY}"
+
+          echo "Checking read-only access to the Cloudflare Pages projects endpoint..."
+          projects_json="$(api_get "/accounts/${CF_ACCOUNT_ID}/pages/projects?page=1&per_page=100")"
+
+          mapfile -t project_names < <(jq -r '.result[]?.name // empty' <<< "${projects_json}")
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "### Pages projects visible to this token" >> "${GITHUB_STEP_SUMMARY}"
+          if (( ${#project_names[@]} == 0 )); then
+            echo "No Pages projects were returned for this account." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          printf '%s\n' "${project_names[@]}" | sed 's/^/- /' | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          mapfile -t matches < <(jq -r '
+            .result[]?
+            | select((.name | ascii_downcase | contains("autoops"))
+                  or (.name | ascii_downcase | contains("auto-ops")))
+            | .name
+          ' <<< "${projects_json}")
+
+          if (( ${#matches[@]} == 0 )); then
+            echo "::warning::The API token works, but no project name containing 'autoops' or 'auto-ops' was found. Review the project list above."
+            exit 0
+          fi
+          if (( ${#matches[@]} > 1 )); then
+            echo "::error::Multiple possible AutoOps Pages projects were found: ${matches[*]}. Project selection needs to be disambiguated."
+            exit 1
+          fi
+
+          project_name="${matches[0]}"
+          project_json="$(jq -c --arg name "${project_name}" '.result[] | select(.name == $name)' <<< "${projects_json}")"
+          production_branch="$(jq -r '.production_branch // .source.config.production_branch // "unknown"' <<< "${project_json}")"
+          repository_owner="$(jq -r '.source.config.owner // empty' <<< "${project_json}")"
+          repository_name="$(jq -r '.source.config.repo_name // empty' <<< "${project_json}")"
+          domains="$(jq -r '.domains[]? // empty' <<< "${project_json}" | paste -sd ', ' -)"
+          canonical_status="$(jq -r '.canonical_deployment.latest_stage.status // "unknown"' <<< "${project_json}")"
+          canonical_url="$(jq -r '.canonical_deployment.url // empty' <<< "${project_json}")"
+
+          {
+            echo ""
+            echo "### AutoOps Hub Pages project: ${project_name}"
+            echo "- Connected repository: ${repository_owner}/${repository_name}"
+            echo "- Configured production branch: ${production_branch}"
+            echo "- Expected branch: ${EXPECTED_PRODUCTION_BRANCH}"
+            echo "- Canonical deployment status: ${canonical_status}"
+            echo "- Canonical deployment URL: ${canonical_url:-not reported}"
+            echo "- Domains: ${domains:-none reported}"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${production_branch}" == "${EXPECTED_PRODUCTION_BRANCH}" ]]; then
+            echo "::notice::Cloudflare Pages production branch matches the expected AutoOps Hub branch."
+          else
+            echo "::warning::Cloudflare Pages production branch does not match the expected branch."
+          fi
+
+          echo "Fetching the latest ten production deployments..."
+          deployments_json="$(api_get "/accounts/${CF_ACCOUNT_ID}/pages/projects/${project_name}/deployments?env=production&page=1&per_page=10")"
+
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "### Recent production deployments" >> "${GITHUB_STEP_SUMMARY}"
+          deployment_count="$(jq '.result | length' <<< "${deployments_json}")"
+          if [[ "${deployment_count}" == "0" ]]; then
+            echo "No production deployments were returned." | tee -a "${GITHUB_STEP_SUMMARY}"
+          else
+            jq -r '.result[] |
+              "- " + (.short_id // .id // "unknown") +
+              " | status: " + (.latest_stage.status // "unknown") +
+              " | updated: " + (.modified_on // "unknown") +
+              " | URL: " + (.url // "not reported")' <<< "${deployments_json}" |
+              tee -a "${GITHUB_STEP_SUMMARY}"
+          fi
+
+          echo ""
+          echo "Read-only diagnostic completed. No Cloudflare settings or deployments were changed."
+\n'*}"
 
             if [[ ! "${http_code}" =~ ^2[0-9][0-9]$ ]]; then
-              echo "::error::Cloudflare API returned HTTP ${http_code} for ${endpoint}."
-              jq -r '.errors[]?.message // empty' <<< "${body}" || true
-              exit 1
+              echo "::error::Cloudflare API returned HTTP ${http_code} for ${endpoint}." >&2
+              jq -r '.errors[]?.message // empty' <<< "${body}" >&2 || true
+              return 1
             fi
             if ! jq -e '.success == true' <<< "${body}" >/dev/null; then
-              echo "::error::Cloudflare API did not report success for ${endpoint}."
-              jq -r '.errors[]?.message // empty' <<< "${body}" || true
-              exit 1
+              echo "::error::Cloudflare API did not report success for ${endpoint}." >&2
+              jq -r '.errors[]?.message // empty' <<< "${body}" >&2 || true
+              return 1
             fi
             printf '%s' "${body}"
           }
