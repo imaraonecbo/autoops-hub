@@ -67,18 +67,18 @@ jobs:
               args+=(--header "Content-Type: application/json" --data "${payload}")
             fi
             if ! response="$(curl "${args[@]}" --write-out '|%{http_code}' "https://api.cloudflare.com/client/v4${endpoint}")"; then
-              echo "::error::Cloudflare request failed for ${method} ${endpoint}."
+              echo "::error::Cloudflare request failed for ${method} ${endpoint}." >&2
               return 1
             fi
             http_code="${response##*|}"
             body="${response%|*}"
             if [[ ! "${http_code}" =~ ^2[0-9][0-9]$ ]]; then
-              echo "::error::Cloudflare API returned HTTP ${http_code} for ${method} ${endpoint}."
-              jq -r '.errors[]?.message // empty' <<< "${body}" || true
+              echo "::error::Cloudflare API returned HTTP ${http_code} for ${method} ${endpoint}." >&2
+              jq -r '.errors[]?.message // empty' <<< "${body}" >&2 || true
               return 1
             fi
             if ! jq -e '.success == true' <<< "${body}" >/dev/null; then
-              echo "::error::Cloudflare API did not report success for ${method} ${endpoint}."
+              echo "::error::Cloudflare API did not report success for ${method} ${endpoint}." >&2
               jq -r '.errors[]?.message // empty' <<< "${body}" || true
               return 1
             fi
